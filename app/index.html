@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wardrobe Passport</title>
+  <meta name="description" content="Every piece you own gets a digital passport. Sell it safely: the buyer's payment is held until delivery, then the money and the item's history move together." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f1b33'/%3E%3Cpath d='M18 54V28c0-9 6-16 14-16s14 7 14 16v26z' fill='none' stroke='%23c9a45c' stroke-width='4'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M16 56V28C16 17 23 9 32 9s16 8 16 19v28z" />
+          <path d="M28 27c0-3 2-4 4-4s4 1 4 4c0 2-4 3-4 5" />
+          <path d="M32 32l-11 9h22z" />
+        </svg>
+        <div>
+          <h1>Wardrobe Passport</h1>
+          <p>Every piece, with its story.</p>
+        </div>
+      </div>
+      <div class="who" id="who" aria-label="Choose who you are"></div>
+    </div>
+  </header>
+
+  <main>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" data-tab="wardrobe" class="tab">My wardrobe</button>
+      <button role="tab" data-tab="shop" class="tab">Shop pre-owned</button>
+      <button role="tab" data-tab="orders" class="tab">My orders</button>
+    </nav>
+
+    <div class="how" id="how">
+      <div class="how-step"><span>1</span>List a piece from your wardrobe</div>
+      <div class="how-step"><span>2</span>Buyer pays. The money is held safely</div>
+      <div class="how-step"><span>3</span>Buyer confirms it arrived. Money and passport move together</div>
+    </div>
+
+    <section id="view" aria-live="polite"></section>
+  </main>
+
+  <footer class="foot" id="foot"></footer>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" aria-live="polite"></div>
+
+  <script src="vendor/ethers.umd.min.js"></script>
+  <script src="config.js"></script>
+  <script src="abi.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

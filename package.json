@@ -1,0 +1,16 @@
+{
+  "name": "wardrobe-passport",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Digital passports for the things you own, with resale where the payment is held until delivery. Built on Arc for UBC 2026.",
+  "scripts": {
+    "test": "node test/run-tests.js",
+    "devchain": "node test/devchain.js",
+    "serve": "python -m http.server 8080 --directory app"
+  },
+  "devDependencies": {
+    "ethers": "^6.17.0",
+    "ganache": "^7.9.2",
+    "solc": "0.8.24"
+  }
+}
