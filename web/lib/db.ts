@@ -37,6 +37,16 @@ create table if not exists settings (
   key text primary key,
   value text not null
 );
+create table if not exists auth_requests (
+  item_id bigint primary key,
+  requested_by text not null,
+  owner_address text not null,
+  partner_address text not null,
+  status text not null default 'pending',
+  note text,
+  created_at timestamptz not null default now(),
+  decided_at timestamptz
+);
 `;
 
 const g = globalThis as unknown as { __wpDb?: Promise<Db> };

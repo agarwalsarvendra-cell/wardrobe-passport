@@ -374,3 +374,34 @@ ul.plain li { margin: 2px 0; }
 
 .mono-inline { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
 .fingerprint { font-size: 12px !important; margin-top: -4px !important; }
+
+/* ---------- Sign in and role dashboards ---------- */
+.signout { border: 1px solid rgba(255,255,255,.25); background: transparent; color: #dfe5f2; border-radius: 999px; padding: 8px 14px; font-weight: 600; font-size: 13px; }
+.signout:hover { background: rgba(255,255,255,.08); }
+div.persona { cursor: default; }
+
+.roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.role-card {
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 22px 20px 18px; text-align: left; display: flex; flex-direction: column; gap: 6px;
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+}
+.role-card:hover, .role-card:focus-visible { transform: translateY(-2px); border-color: var(--gold); box-shadow: 0 2px 4px rgba(15,27,51,.08), 0 14px 30px rgba(15,27,51,.10); outline: none; }
+.role-card .avatar { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 18px; color: var(--navy); margin-bottom: 6px; }
+.role-kicker { font-size: 11px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; color: #8a6a26; }
+.role-card h3 { font-family: var(--serif); font-size: 22px; font-weight: 600; margin: 0; color: var(--navy); }
+.role-card p { margin: 0; color: var(--muted); font-size: 14px; min-height: 42px; }
+.role-as { font-size: 12.5px; color: var(--ink); background: var(--cream); border-radius: 8px; padding: 6px 10px; margin-top: 8px; }
+.role-go { margin-top: 10px; font-weight: 700; font-size: 14px; color: var(--navy); }
+.fine.center { text-align: center; margin-top: 18px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 6px; }
+.tile { background: var(--navy); color: #fff; border-radius: 14px; padding: 14px 16px; }
+.tile strong { display: block; font-family: var(--serif); font-size: 26px; font-weight: 600; color: var(--gold); line-height: 1.15; }
+.tile small { color: #c5cde0; font-size: 12.5px; }
+.panel { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+.panel .steps { margin: 0; }
+.done-cta { font-weight: 700; font-size: 13px; color: #8a6a26; white-space: nowrap; }
+.tip.boxed { background: var(--warn-soft); border-radius: 12px; padding: 10px 14px; margin: 0 0 14px; }
+.panel .steps li:not(.how-link) { display: flex !important; }
+.section-head .btn { white-space: nowrap; }

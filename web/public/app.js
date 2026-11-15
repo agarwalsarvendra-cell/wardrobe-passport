@@ -11,6 +11,9 @@
  * - The API signs with each person's managed wallet (Circle) and sends the
  *   call to the WardrobePassportV2 contract on Arc, which holds the money and
  *   the rules. Amounts are in dollars (Arc's native currency is USDC).
+ * - People sign in by role: seller, buyer or authenticator. Each role has its
+ *   own screens. A piece must be authenticated before it can be listed, and the
+ *   authenticator who vouched for it settles any dispute on that sale.
  * - MetaMask is used for one setup step only: the contract's deployer approving
  *   a partner.
  * - #passport=<id> opens a public, read-only passport page anyone can verify.
@@ -29,7 +32,13 @@
     { id: "alex", name: "Alex", color: "#8fb8a8" },
     { id: "shop", name: "Pawn shop", color: "#b9a3d6", partner: true, regName: "Demo Pawn Shop", city: "Atlanta" },
   ];
-  const LS = { keys: "wp.personaKeys.v1", current: "wp.currentPersona", tab: "wp.tab" };
+  // Demo sign-in: each role opens one demo account. Real accounts replace this map.
+  const ROLES = {
+    seller: { persona: "maya", label: "Seller", cta: "I'm selling", blurb: "Add your pieces, get them authenticated, list them and get paid.", tabs: [["home", "Dashboard"], ["pieces", "My pieces"], ["sales", "Sales"]] },
+    buyer: { persona: "alex", label: "Buyer", cta: "I'm buying", blurb: "Shop authenticated pieces. Your money is held until yours arrives.", tabs: [["shop", "Marketplace"], ["orders", "My orders"], ["mine", "My purchases"]] },
+    auth: { persona: "shop", label: "Authenticator", cta: "I'm an authenticator", blurb: "Inspect pieces in person, stamp their passports and settle disputes.", tabs: [["requests", "To verify"], ["disputes", "Disputes"], ["record", "My record"]] },
+  };
+  const LS = { role: "wp.role", tab: "wp.tab." };
   const SHIP_DAYS = 5;
   const CONFIRM_DAYS = 7;
   const DEPOSIT_BPS = 1000n;
@@ -40,8 +49,10 @@
     wallets: {},
     treasury: null,
     balances: {},
+    role: null,
     current: "maya",
-    tab: "wardrobe",
+    tab: null,
+    authRequests: {},
     items: [],
     histories: {},
     partners: [],
@@ -89,6 +100,21 @@
 
   const partnerOf = (addr) => state.partners.find((p) => same(p.addr, addr));
   const activePartners = () => state.partners.filter((p) => p.active);
+  const is = (r) => state.role === r;
+  const reqOf = (id) => state.authRequests[id] || null;
+  // A piece is verified when a partner authenticated it after it last changed hands.
+  function verified(item) {
+    if (isZero(item.authBy)) return false;
+    const h = state.histories[item.id] || [];
+    return item.authAt >= (h.length ? h[h.length - 1].at : 0);
+  }
+  // Where a piece stands in the authentication stage: verified, pending, declined or none.
+  function authStage(item) {
+    if (verified(item)) return "verified";
+    const r = reqOf(item.id);
+    if (r && same(r.owner, item.owner) && (r.status === "pending" || r.status === "declined")) return r.status;
+    return "none";
+  }
   const shopAddr = () => state.wallets.shop?.address;
   const shopApproved = () => !!partnerOf(shopAddr());
 
@@ -143,10 +169,10 @@
 
   // Sample pieces make demos fast; they're normal passports once created.
   const SAMPLES = [
-    { name: "Navy wool blazer", brand: "Hugo Boss", details: "Size 40R, worn twice", kind: "jacket", price: 8 },
-    { name: "Steel dive watch", brand: "Rolex", details: "Box and papers, serviced 2025", kind: "watch", price: 9 },
-    { name: "Leather tote", brand: "Coach", details: "Tan, like new", kind: "bag", price: 6 },
-    { name: "White leather sneakers", brand: "Common Projects", details: "US 9, light wear", kind: "shoes", price: 5 },
+    { name: "Navy wool blazer", brand: "Hugo Boss", details: "Size 40R, worn twice", kind: "jacket" },
+    { name: "Steel dive watch", brand: "Seiko", details: "Box and papers, serviced 2025", kind: "watch" },
+    { name: "Leather tote", brand: "Coach", details: "Tan, like new", kind: "bag" },
+    { name: "White leather sneakers", brand: "Common Projects", details: "US 9, light wear", kind: "shoes" },
   ];
 
   // ------------------------------------------------------------- API access
@@ -169,11 +195,18 @@
     }
   }
 
-  function loadPersonas() {
-    const saved = lsGet(LS.current);
-    if (person(saved)) state.current = saved;
-    const tab = lsGet(LS.tab);
-    if (["wardrobe", "shop", "orders"].includes(tab)) state.tab = tab;
+  function setRole(r, restoreTab = false) {
+    state.role = ROLES[r] ? r : null;
+    lsSet(LS.role, state.role || "");
+    if (!state.role) { state.tab = null; return; }
+    state.current = ROLES[r].persona;
+    // Signing in lands on the role's home screen; a page reload returns to the tab you were on.
+    const saved = restoreTab ? lsGet(LS.tab + r) : null;
+    state.tab = ROLES[r].tabs.some(([id]) => id === saved) ? saved : ROLES[r].tabs[0][0];
+  }
+  function loadSession() {
+    const saved = lsGet(LS.role);
+    if (ROLES[saved]) setRole(saved, true);
   }
 
   // Overlapping refreshes (timer + after an action) must not let an older,
@@ -189,6 +222,7 @@
       for (const [id, h] of Object.entries(d.histories)) state.histories[id] = h.map((t) => ({ ...t, price: BigInt(t.price) }));
       state.partners = d.partners;
       state.records = d.records;
+      state.authRequests = d.authRequests || {};
       for (const p of PERSONAS) state.balances[p.id] = BigInt(d.balances[state.wallets[p.id].address.toLowerCase()] ?? 0);
       if (state.treasury) state.treasury.balance = BigInt(d.balances[state.treasury.address.toLowerCase()] ?? 0);
       state.loaded = true;
@@ -223,7 +257,10 @@
   // signs with the person's managed wallet and sends it to the contract.
   const ACTIONS = {
     createPassport: (name, brand, details, photo, icon) => ({ action: "createPassport", name, brand, details, photo, icon }),
-    listForSale: (id, priceWei, partner) => ({ action: "list", id, price: ethers.formatUnits(priceWei, 18), partner }),
+    requestAuth: (id, partner) => ({ action: "requestAuth", id, partner }),
+    cancelAuthRequest: (id) => ({ action: "cancelAuthRequest", id }),
+    declineAuth: (id, reason) => ({ action: "declineAuth", id, reason }),
+    listForSale: (id, priceWei) => ({ action: "list", id, price: ethers.formatUnits(priceWei, 18) }),
     cancelListing: (id) => ({ action: "unlist", id }),
     buy: (id) => ({ action: "buy", id }),
     markShipped: (id) => ({ action: "ship", id }),
@@ -320,7 +357,14 @@
         ? `<span class="chip held">On its way · ${usd(item.price)} held</span>`
         : `<span class="chip held">Shipped · ${usd(item.price)} held</span>`;
       case STATUS.DISPUTED: return `<span class="chip bad">Dispute open</span>`;
-      default: return `<span class="chip owned">In wardrobe</span>`;
+      default: {
+        if (!is("seller") || !same(item.owner, myAddr())) return `<span class="chip owned">${same(item.owner, myAddr()) ? "Yours" : "Not for sale"}</span>`;
+        const st = authStage(item);
+        if (st === "verified") return `<span class="chip ok">Verified · ready to list</span>`;
+        if (st === "pending") return `<span class="chip held">Waiting for ${esc(nameOf(reqOf(item.id).partner))}</span>`;
+        if (st === "declined") return `<span class="chip bad">Not verified</span>`;
+        return `<span class="chip owned">Needs authentication</span>`;
+      }
     }
   }
 
@@ -330,7 +374,7 @@
     return f.created ? `Passport since ${fmtDate(f.created)}` : "";
   }
 
-  const authBadge = (item) => (isZero(item.authBy) ? "" : `<span class="auth-badge" title="Authenticated by ${esc(nameOf(item.authBy))}">✓ Authenticated</span>`);
+  const authBadge = (item) => (verified(item) ? `<span class="auth-badge" title="Authenticated by ${esc(nameOf(item.authBy))}">✓ Verified</span>` : "");
 
   function card(item, footer) {
     return `
@@ -346,78 +390,149 @@
   }
 
   function renderWho() {
-    $("#who").innerHTML =
-      PERSONAS.map((p) => `
-        <button class="persona ${p.id === state.current ? "active" : ""}" data-persona="${p.id}" aria-pressed="${p.id === state.current}">
-          <span class="avatar" style="background:${p.color}">${p.name[0]}</span>
-          <span><div class="p-name">${p.name}${p.partner ? ` <em>partner</em>` : ""}</div><div class="p-bal">${state.loaded ? usd(state.balances[p.id]) : "…"}</div></span>
-        </button>`).join("") +
-      `<button class="addmoney" data-action="add-money">+ Add money</button>`;
+    const el = $("#who");
+    if (!state.role || state.publicId) { el.innerHTML = ""; return; }
+    const p = cur();
+    el.innerHTML = `
+      <div class="persona active" aria-label="Signed in">
+        <span class="avatar" style="background:${p.color}">${p.name[0]}</span>
+        <span><div class="p-name">${esc(p.regName || p.name)} <em>${esc(ROLES[state.role].label)}</em></div><div class="p-bal">${state.loaded ? usd(state.balances[p.id]) : "…"}</div></span>
+      </div>
+      <button class="addmoney" data-action="add-money">+ Add money</button>
+      <button class="signout" data-action="sign-out">Sign out</button>`;
   }
 
-  function ordersCount() {
-    if (!me()) return 0;
-    return state.items.filter((i) => IN_SALE.includes(i.status) && (same(i.buyer, myAddr()) || same(i.owner, myAddr()))).length;
-  }
+  const mineSelling = () => state.items.filter((i) => IN_SALE.includes(i.status) && same(i.owner, myAddr()));
+  const mineBuying = () => state.items.filter((i) => IN_SALE.includes(i.status) && same(i.buyer, myAddr()));
+  const myRequests = () => state.items.filter((i) => {
+    const r = reqOf(i.id);
+    return r && r.status === "pending" && same(r.partner, myAddr()) && same(r.owner, i.owner) && i.status === STATUS.OWNED && !verified(i);
+  });
+  const myDisputes = () => state.items.filter((i) => i.status === STATUS.DISPUTED && same(i.partner, myAddr()));
 
   function renderTabs() {
     const nav = $("#tabs");
-    if (cur().partner) {
-      const n = state.items.filter((i) => i.status === STATUS.DISPUTED && same(i.partner, myAddr())).length;
-      nav.innerHTML = `<button role="tab" class="tab active" aria-selected="true">Partner desk${n ? `<span class="count">${n}</span>` : ""}</button>`;
-      return;
-    }
-    const n = ordersCount();
-    const tabs = [["wardrobe", "My wardrobe"], ["shop", "Shop pre-owned"], ["orders", `Orders${n ? `<span class="count">${n}</span>` : ""}`]];
-    nav.innerHTML = tabs.map(([id, label]) =>
-      `<button role="tab" data-tab="${id}" class="tab ${state.tab === id ? "active" : ""}" aria-selected="${state.tab === id}">${label}</button>`).join("");
+    if (!state.role || !state.loaded) { nav.innerHTML = ""; return; }
+    const counts = {
+      sales: mineSelling().length, orders: mineBuying().length,
+      requests: myRequests().length, disputes: myDisputes().length,
+    };
+    nav.innerHTML = ROLES[state.role].tabs.map(([id, label]) =>
+      `<button role="tab" data-tab="${id}" class="tab ${state.tab === id ? "active" : ""}" aria-selected="${state.tab === id}">${label}${counts[id] ? `<span class="count">${counts[id]}</span>` : ""}</button>`).join("");
   }
 
   function setupTip() {
     if (!state.loaded) return "";
     if (!shopApproved()) {
-      return `<p class="tip">Demo setup: the pawn shop isn't an approved partner yet. <button class="linkish" data-action="approve-partner">Approve it with MetaMask</button> (the account that deployed the contract).</p>`;
+      return `<p class="tip">Demo setup: the pawn shop isn't an approved authenticator yet. <button class="linkish" data-action="approve-partner">Approve it with MetaMask</button> (the account that deployed the contract).</p>`;
     }
-    const broke = PERSONAS.filter((p) => (state.balances[p.id] ?? 0n) === 0n).map((p) => p.name);
-    if (broke.length) return `<p class="tip">Demo tip: ${esc(broke.join(" and "))} ${broke.length === 1 ? "has" : "have"} no test dollars. Select them, then <button class="linkish" data-action="add-money">+ Add money</button>.</p>`;
     return "";
   }
+  function moneyTip() {
+    if ((state.balances[state.current] ?? 0n) > 0n) return "";
+    return `<p class="tip boxed">You have no test dollars yet. <button class="linkish" data-action="add-money">+ Add money</button> to cover ${is("buyer") ? "purchases" : is("seller") ? "the listing deposit and small network fees" : "small network fees"}.</p>`;
+  }
+  const tiles = (list) => `<div class="tiles">${list.map(([v, l]) => `<div class="tile"><strong>${v}</strong><small>${esc(l)}</small></div>`).join("")}</div>`;
+  const STEPS = ["Seller asks for authentication", "Authenticator checks it in person", "Listed as verified", "Buyer pays, money is held", "Shipped: confirm or dispute", "Authenticator settles disputes"];
+  const stepsHtml = () => `<ol class="steps">${STEPS.map((t, i) => `<li><span>${i + 1}</span>${t}</li>`).join("")}<li class="how-link"><button class="linkish" data-action="how">How it works on Arc</button></li></ol>`;
 
   function renderHero() {
     const el = $("#hero");
-    if (!state.loaded) { el.innerHTML = ""; return; }
+    if (!state.loaded || state.role) { el.innerHTML = ""; return; }
     const s = stats();
     el.innerHTML = `
       <div class="hero-copy">
         <h2>Resale you can trust.</h2>
-        <p>Every piece gets a passport on Arc. A local partner can authenticate it in person. When it sells, the buyer's money is held until the piece arrives, and the partner settles any dispute.</p>
-        <ol class="steps">
-          <li><span>1</span>Partner authenticates</li>
-          <li><span>2</span>Buyer pays, money held</li>
-          <li><span>3</span>Shipped: confirm or dispute</li>
-          <li class="how-link"><button class="linkish" data-action="how">How it works on Arc</button></li>
-        </ol>
+        <p>Every piece gets a passport on Arc. A local authenticator checks it in person before it can be listed. The buyer's money is held until the piece arrives, and the same authenticator settles any dispute.</p>
+        ${stepsHtml()}
         ${setupTip()}
       </div>
       <div class="hero-stats" aria-label="Live totals from Arc">
         <div class="stat"><strong>${s.passports}</strong><small>passports on Arc</small></div>
-        <div class="stat"><strong>${s.authed}</strong><small>authenticated by a partner</small></div>
+        <div class="stat"><strong>${s.authed}</strong><small>authenticated in person</small></div>
         <div class="stat"><strong>${usd(s.volume)}</strong><small>paid out in ${s.sales} sale${s.sales === 1 ? "" : "s"}</small></div>
         <div class="stat"><strong>${usd(s.held)}</strong><small>held right now</small></div>
       </div>`;
   }
 
-  function renderWardrobe() {
+  // ------------------------------------------------------------------ sign in
+  function renderLogin() {
+    const wallet = CFG.walletProvider === "circle" ? "Circle wallet" : "test wallet";
+    return `
+      <div class="section-head"><div><h2>Sign in</h2><p>Choose how you're using Wardrobe Passport today.</p></div></div>
+      <div class="roles">${Object.entries(ROLES).map(([id, r]) => {
+        const p = person(r.persona);
+        return `
+        <button class="role-card" data-role="${id}">
+          <span class="avatar" style="background:${p.color}">${p.name[0]}</span>
+          <span class="role-kicker">${esc(r.label)}</span>
+          <h3>${esc(r.cta)}</h3>
+          <p>${esc(r.blurb)}</p>
+          <span class="role-as">Signs in as ${esc(p.regName ? `${p.regName}, ${p.city}` : p.name)}</span>
+          <span class="role-go">Continue →</span>
+        </button>`;
+      }).join("")}</div>
+      <p class="fine center">Demo sign-in, no password. Each account has its own ${wallet} on ${esc(CFG.chainName)}.</p>`;
+  }
+
+  // ------------------------------------------------------------------ seller
+  const NEXT = {
+    none: "Ask an authenticator to verify it",
+    declined: "Not verified. Ask again or choose another authenticator",
+    verified: "Verified. Set a price and list it",
+  };
+  function renderSellerHome() {
+    const mine = state.items.filter((i) => same(i.owner, myAddr()));
+    const owned = mine.filter((i) => i.status === STATUS.OWNED);
+    const waiting = owned.filter((i) => authStage(i) === "pending");
+    const listed = mine.filter((i) => i.status === STATUS.LISTED);
+    const toShip = mine.filter((i) => i.status === STATUS.PAID);
+    let earned = 0n;
+    for (const it of state.items) for (const t of state.histories[it.id] || []) if (same(t.from, myAddr())) earned += t.price - feeOf(t.price);
+    const dis = state.busy ? "disabled" : "";
+
+    let html = `
+      <div class="section-head">
+        <div><h2>Welcome back, ${esc(cur().name)}</h2><p>Seller · ${esc(recText(myAddr()))}</p></div>
+        <button class="btn primary" data-action="add-item" ${dis}>+ Add a piece</button>
+      </div>
+      ${moneyTip()}
+      ${tiles([[mine.length, "pieces"], [waiting.length, "waiting for authenticator"], [listed.length, "for sale"], [toShip.length, "to ship"], [usd(earned), "earned from sales"]])}`;
+
+    const todo = [];
+    for (const i of owned) { const st = authStage(i); if (NEXT[st]) todo.push([i, NEXT[st], st === "verified" ? "List it" : "Request"]); }
+    for (const i of toShip) todo.push([i, `${nameOf(i.buyer)} paid ${usd(i.price)}. Ship it and mark it as shipped`, "Ship"]);
+    for (const i of mine.filter((x) => x.status === STATUS.SHIPPED && now() >= x.shippedAt + CONFIRM_DAYS * 86400)) todo.push([i, "The buyer didn't respond. You can collect the payment", "Collect"]);
+    for (const i of mine.filter((x) => x.status === STATUS.DISPUTED)) todo.push([i, `Dispute open. ${nameOf(i.partner)} will decide`, "View"]);
+
+    html += `<div class="h-label">What to do next</div>`;
+    if (!mine.length) {
+      html += `<div class="empty"><h3>Start with your first piece</h3><p>Add a piece and it gets a digital passport: a photo, who owned it, when, and for how much.</p><button class="btn gold" data-action="add-item" ${dis}>Add your first piece</button></div>`;
+    } else if (!todo.length) {
+      html += `<div class="empty slim"><p>Nothing needs you right now${waiting.length ? ". An authenticator is checking your piece" : listed.length ? ". Your listing is live in the marketplace" : ""}.</p></div>`;
+    } else {
+      html += `<div class="done-list">` + todo.map(([i, textLine, cta]) => `
+        <button class="done" data-open="${i.id}">
+          ${art(i, "mini")}
+          <span><strong>${esc(i.name)}</strong><small>${esc(textLine)}</small></span>
+          <span class="done-cta">${cta} →</span>
+        </button>`).join("") + `</div>`;
+    }
+    html += `<div class="h-label">How a sale works</div><div class="panel">${stepsHtml()}</div>`;
+    return html;
+  }
+
+  function renderPieces() {
     const mine = state.items.filter((i) => same(i.owner, myAddr())).reverse();
     const head = `
       <div class="section-head">
-        <div><h2>${esc(cur().name)}'s wardrobe</h2><p>${mine.length} piece${mine.length === 1 ? "" : "s"} · ${esc(recText(myAddr()))}</p></div>
+        <div><h2>My pieces</h2><p>${mine.length} piece${mine.length === 1 ? "" : "s"} · each one is authenticated before it can be listed</p></div>
         <button class="btn primary" data-action="add-item" ${state.busy ? "disabled" : ""}>+ Add a piece</button>
       </div>`;
     if (!mine.length) {
       return head + `
         <div class="empty">
-          <h3>Your wardrobe is empty</h3>
+          <h3>No pieces yet</h3>
           <p>Add a piece and it gets a digital passport: a photo, who owned it, when, and for how much.</p>
           <button class="btn gold" data-action="add-item" ${state.busy ? "disabled" : ""}>Add your first piece</button>
         </div>`;
@@ -425,23 +540,32 @@
     return head + `<div class="grid">${mine.map((i) => card(i)).join("")}</div>`;
   }
 
+  // ------------------------------------------------------------------- buyer
   function renderShop() {
     const forSale = state.items.filter((i) => i.status === STATUS.LISTED && !same(i.owner, myAddr())).reverse();
     const head = `
       <div class="section-head">
-        <div><h2>Shop pre-owned</h2><p>Every piece shows its history and its seller's record. Your money is held until it arrives.</p></div>
-      </div>`;
+        <div><h2>Marketplace</h2><p>Every piece here was checked in person by an authenticator. Your money is held until it arrives.</p></div>
+      </div>${moneyTip()}`;
     if (!forSale.length) {
-      const other = PERSONAS.find((p) => !p.partner && p.id !== state.current);
       return head + `
         <div class="empty">
           <h3>Nothing for sale right now</h3>
-          <p>Switch to ${esc(other.name)} and list a piece from their wardrobe.</p>
+          <p>Pieces appear here once an authenticator has verified them and the seller has listed them.</p>
         </div>`;
     }
     return head + `<div class="grid">${forSale.map((i) => card(i, `
       <span class="price">${usd(i.price)}</span>
       <span class="chip ok" title="${esc(recText(i.owner))}">${esc(nameOf(i.owner))} · ${recOf(i.owner).sold} sold</span>`)).join("")}</div>`;
+  }
+
+  function renderMine() {
+    const mine = state.items.filter((i) => same(i.owner, myAddr()) && i.status === STATUS.OWNED).reverse();
+    const head = `<div class="section-head"><div><h2>My purchases</h2><p>Pieces you own, each with its passport · ${esc(recText(myAddr()))}</p></div></div>`;
+    if (!mine.length) {
+      return head + `<div class="empty"><h3>Nothing here yet</h3><p>When a piece arrives and you confirm it, its passport moves to you and it shows here.</p><button class="btn ghost" data-tab-go="shop">Browse the marketplace</button></div>`;
+    }
+    return head + `<div class="grid">${mine.map((i) => card(i)).join("")}</div>`;
   }
 
   // What each side sees and can do for an item that's mid-sale
@@ -503,33 +627,32 @@
       </div>`;
   }
 
-  function renderOrders() {
-    const buying = state.items.filter((i) => IN_SALE.includes(i.status) && same(i.buyer, myAddr()));
-    const selling = state.items.filter((i) => IN_SALE.includes(i.status) && same(i.owner, myAddr()));
+  function renderOrders(side) {
+    const buying = side === "buying";
+    const open = buying ? mineBuying() : mineSelling();
     const done = [];
     for (const it of state.items) {
       for (const t of state.histories[it.id] || []) {
         if (isZero(t.from)) continue;
-        if (same(t.to, myAddr())) done.push({ it, t, kind: "Bought", other: t.from });
-        else if (same(t.from, myAddr())) done.push({ it, t, kind: "Sold", other: t.to });
+        if (buying && same(t.to, myAddr())) done.push({ it, t, kind: "Bought", other: t.from });
+        else if (!buying && same(t.from, myAddr())) done.push({ it, t, kind: "Sold", other: t.to });
       }
     }
     done.sort((a, b) => b.t.at - a.t.at);
 
     let html = `
       <div class="section-head">
-        <div><h2>Orders</h2><p>What you're buying, what you've sold, and what's done · ${esc(recText(myAddr()))}</p></div>
+        <div><h2>${buying ? "My orders" : "Sales"}</h2><p>${buying ? "What you've paid for and what has arrived" : "What you've sold, what to ship and what you've been paid"} · ${esc(recText(myAddr()))}</p></div>
       </div>`;
-    if (!buying.length && !selling.length && !done.length) {
+    if (!open.length && !done.length) {
       return html + `
         <div class="empty">
-          <h3>No orders yet</h3>
-          <p>When you buy or sell a piece, it shows here until the sale is settled.</p>
-          <button class="btn ghost" data-tab-go="shop">Browse pre-owned</button>
+          <h3>${buying ? "No orders yet" : "No sales yet"}</h3>
+          <p>${buying ? "When you buy a piece, it shows here until it arrives and the sale is settled." : "When someone buys one of your pieces, it shows here until the sale is settled."}</p>
+          <button class="btn ghost" data-tab-go="${buying ? "shop" : "pieces"}">${buying ? "Browse the marketplace" : "See my pieces"}</button>
         </div>`;
     }
-    if (buying.length) html += `<div class="h-label">You're buying</div>` + buying.map(orderRow).join("");
-    if (selling.length) html += `<div class="h-label">You're selling</div>` + selling.map(orderRow).join("");
+    if (open.length) html += `<div class="h-label">${buying ? "On the way" : "In progress"}</div>` + open.map(orderRow).join("");
     if (done.length) {
       html += `<div class="h-label">Completed</div><div class="done-list">` + done.map(({ it, t, kind, other }) => `
         <button class="done" data-open="${it.id}">
@@ -548,58 +671,73 @@
     if (!p) {
       return `
         <div class="empty">
-          <h3>This shop isn't an approved partner yet</h3>
-          <p>Partners are approved by the account that deployed the contract. Once approved, the shop can authenticate pieces and settle disputes.</p>
+          <h3>This shop isn't an approved authenticator yet</h3>
+          <p>Authenticators are approved by the account that deployed the contract. Once approved, the shop can verify pieces and settle disputes.</p>
           <button class="btn gold" data-action="approve-partner">Approve “${esc(cur().regName)}” with MetaMask</button>
         </div>`;
     }
-    const disputes = state.items.filter((i) => i.status === STATUS.DISPUTED && same(i.partner, myAddr()));
-    const toAuth = state.items.filter((i) => isZero(i.authBy) && !same(i.owner, myAddr())).reverse();
+    const disputes = myDisputes();
+    const requests = myRequests();
     const behind = state.items.filter((i) => same(i.partner, myAddr()) && i.status !== STATUS.DISPUTED && i.status !== STATUS.OWNED);
     const stamped = state.items.filter((i) => same(i.authBy, myAddr())).reverse();
 
     let html = `
       <div class="section-head">
         <div><h2>${esc(p.name)} · ${esc(p.city)}</h2>
-        <p>Verified partner${p.active ? "" : " (paused)"} · ${p.authenticated} authenticated · ${p.disputesResolved} dispute${p.disputesResolved === 1 ? "" : "s"} settled · earns ${Number(FEE_BPS) / 100}% of each sale it stands behind</p></div>
-      </div>`;
+        <p>Verified authenticator${p.active ? "" : " (paused)"} · earns ${Number(FEE_BPS) / 100}% of each sale it stands behind</p></div>
+      </div>
+      ${moneyTip()}
+      ${tiles([[requests.length, "pieces to verify"], [disputes.length, "open disputes"], [p.authenticated, "pieces authenticated"], [p.disputesResolved, "disputes settled"], [usd(state.balances[state.current]), "balance"]])}`;
 
-    html += `<div class="h-label">Disputes to settle</div>`;
-    html += disputes.length ? disputes.map((i) => `
-      <div class="order">
-        ${art(i)}
-        <div>
-          <h3>${esc(i.name)} <small class="muted">Passport #${i.id}</small></h3>
-          <p>${esc(nameOf(i.buyer))} bought it from ${esc(nameOf(i.owner))} for ${usd(i.price)}</p>
-          <span class="chip bad">Buyer says: “${esc(i.disputeReason)}”</span>
-          <p class="fine">Buyer's record: ${esc(recText(i.buyer))}. Seller's record: ${esc(recText(i.owner))}.</p>
-          <div class="actions">
-            <button class="btn primary" data-action="resolve" data-win="buyer" data-id="${i.id}" ${dis}>Buyer is right: refund ${usd(i.price)}</button>
-            <button class="btn ghost" data-action="resolve" data-win="seller" data-id="${i.id}" ${dis}>Seller is right: release payment</button>
-            <button class="btn ghost" data-open="${i.id}">View passport</button>
+    if (state.tab === "disputes") {
+      html += `<div class="h-label">Disputes to settle</div>`;
+      html += disputes.length ? disputes.map((i) => `
+        <div class="order">
+          ${art(i)}
+          <div>
+            <h3>${esc(i.name)} <small class="muted">Passport #${i.id}</small></h3>
+            <p>${esc(nameOf(i.buyer))} bought it from ${esc(nameOf(i.owner))} for ${usd(i.price)}. You authenticated it on ${fmtDate(i.authAt)}.</p>
+            <span class="chip bad">Buyer says: “${esc(i.disputeReason)}”</span>
+            <p class="fine">Buyer's record: ${esc(recText(i.buyer))}. Seller's record: ${esc(recText(i.owner))}.</p>
+            <div class="actions">
+              <button class="btn primary" data-action="resolve" data-win="buyer" data-id="${i.id}" ${dis}>Buyer is right: refund ${usd(i.price)}</button>
+              <button class="btn ghost" data-action="resolve" data-win="seller" data-id="${i.id}" ${dis}>Seller is right: release payment</button>
+              <button class="btn ghost" data-open="${i.id}">View passport</button>
+            </div>
           </div>
-        </div>
-      </div>`).join("") : `<div class="empty slim"><p>No open disputes.</p></div>`;
+        </div>`).join("") : `<div class="empty slim"><p>No open disputes.</p></div>`;
+      return html;
+    }
 
-    html += `<div class="h-label">Pieces to authenticate</div>`;
-    html += toAuth.length ? `<div class="done-list">` + toAuth.map((i) => `
-      <div class="done static">
-        ${art(i, "mini")}
-        <span><strong>${esc(i.name)} · ${esc(i.brand || "No brand")}</strong><small>Passport #${i.id} · owner ${esc(nameOf(i.owner))}${i.details ? ` · ${esc(i.details)}` : ""}</small></span>
-        <button class="btn gold small" data-action="auth" data-id="${i.id}" ${dis}>Authenticate</button>
-      </div>`).join("") + `</div>` : `<div class="empty slim"><p>Nothing waiting. Every passport has been authenticated.</p></div>`;
-
-    if (behind.length) {
-      html += `<div class="h-label">Sales you stand behind</div><div class="done-list">` + behind.map((i) => `
+    if (state.tab === "record") {
+      html += `<div class="h-label">Sales you stand behind</div>`;
+      html += behind.length ? `<div class="done-list">` + behind.map((i) => `
         <button class="done" data-open="${i.id}">
           ${art(i, "mini")}
           <span><strong>${esc(i.name)}</strong><small>${esc(nameOf(i.owner))}${isZero(i.buyer) ? " · listed" : ` → ${esc(nameOf(i.buyer))}`} · your fee ${usd(feeOf(i.price))}</small></span>
           <span class="done-amt">${usd(i.price)}</span>
-        </button>`).join("") + `</div>`;
+        </button>`).join("") + `</div>` : `<div class="empty slim"><p>No live sales right now.</p></div>`;
+      html += `<div class="h-label">Authenticated by you</div>`;
+      html += stamped.length ? `<div class="grid">${stamped.map((i) => card(i)).join("")}</div>` : `<div class="empty slim"><p>Nothing yet.</p></div>`;
+      return html;
     }
-    if (stamped.length) {
-      html += `<div class="h-label">Authenticated by you</div><div class="grid">${stamped.map((i) => card(i)).join("")}</div>`;
-    }
+
+    html += `<div class="h-label">Sellers waiting for you</div>`;
+    html += requests.length ? requests.map((i) => `
+      <div class="order">
+        ${art(i)}
+        <div>
+          <h3>${esc(i.name)} <small class="muted">Passport #${i.id}</small></h3>
+          <p>${esc(i.brand || "No brand")}${i.details ? ` · ${esc(i.details)}` : ""}</p>
+          <span class="chip held">${esc(nameOf(i.owner))} asked on ${fmtDate(reqOf(i.id).createdAt)}</span>
+          <p class="fine">Owner's record: ${esc(recText(i.owner))}. Inspect the piece in person before you stamp it. It can't be listed until you do.</p>
+          <div class="actions">
+            <button class="btn gold" data-action="auth" data-id="${i.id}" ${dis}>Authenticate</button>
+            <button class="btn ghost" data-action="decline" data-id="${i.id}" ${dis}>Can't verify</button>
+            <button class="btn ghost" data-open="${i.id}">View passport</button>
+          </div>
+        </div>
+      </div>`).join("") : `<div class="empty slim"><p>Nothing waiting. Sellers' requests show up here.</p></div>`;
     return html;
   }
 
@@ -611,7 +749,7 @@
       <span>·</span>
       <button class="linkish foot-link" data-action="how">How it works</button>
       <span>·</span>
-      <span>${CFG.walletProvider === "circle" ? "Wallets by Circle · " : ""}Demo: test dollars and a demo partner</span>`;
+      <span>${CFG.walletProvider === "circle" ? "Wallets by Circle · " : ""}Demo: test dollars and a demo authenticator</span>`;
   }
 
   function render() {
@@ -635,8 +773,14 @@
       return;
     }
     renderHero();
-    view.innerHTML = cur().partner ? renderDesk()
-      : state.tab === "shop" ? renderShop() : state.tab === "orders" ? renderOrders() : renderWardrobe();
+    document.body.classList.toggle("signed-out", !state.role);
+    if (!state.role) { view.innerHTML = renderLogin(); return; }
+    const VIEWS = {
+      home: renderSellerHome, pieces: renderPieces, sales: () => renderOrders("selling"),
+      shop: renderShop, orders: () => renderOrders("buying"), mine: renderMine,
+      requests: renderDesk, disputes: renderDesk, record: renderDesk,
+    };
+    view.innerHTML = (VIEWS[state.tab] || VIEWS[ROLES[state.role].tabs[0][0]])();
     if (state.openItemId) refreshDetailActions();
   }
 
@@ -673,9 +817,11 @@
   }
 
   function authLine(item) {
-    if (isZero(item.authBy)) return `<div class="callout info">Not yet authenticated by a partner. The history below is still verified.</div>`;
+    if (isZero(item.authBy)) return `<div class="callout info">Not yet authenticated. It can't be listed for sale until an authenticator has checked it in person.</div>`;
     const p = partnerOf(item.authBy);
-    return `<div class="callout ok"><strong>✓ Authenticated in person by ${esc(nameOf(item.authBy))}${p ? `, ${esc(p.city)}` : ""}</strong> on ${fmtDate(item.authAt)}.${item.authNote ? ` “${esc(item.authNote)}”` : ""}</div>`;
+    const who = `${esc(nameOf(item.authBy))}${p ? `, ${esc(p.city)}` : ""}`;
+    if (!verified(item)) return `<div class="callout info">Authenticated by ${who} on ${fmtDate(item.authAt)}, before it last changed hands. It needs a fresh check before it can be sold again.</div>`;
+    return `<div class="callout ok"><strong>✓ Authenticated in person by ${who}</strong> on ${fmtDate(item.authAt)}.${item.authNote ? ` “${esc(item.authNote)}”` : ""}</div>`;
   }
 
   function renderPublic(id) {
@@ -782,9 +928,9 @@
   }
   function depositHint(priceStr) {
     const price = parseFloat(priceStr);
-    if (!(price > 0)) return `You lock a 10% deposit while it's listed. It comes back when the sale completes or you take it off sale. The partner earns 3% of the sale.`;
+    if (!(price > 0)) return `You lock a 10% deposit while it's listed. It comes back when the sale completes or you take it off sale. The authenticator earns 3% of the sale.`;
     const w = toWei(price.toFixed(2));
-    return `You lock a ${usd(depositOf(w))} deposit now and get it back when the sale completes. On a sale you receive ${usd(w - feeOf(w))}; the partner earns ${usd(feeOf(w))}.`;
+    return `You lock a ${usd(depositOf(w))} deposit now and get it back when the sale completes. On a sale you receive ${usd(w - feeOf(w))}; the authenticator earns ${usd(feeOf(w))}.`;
   }
 
   function refreshDetailActions() {
@@ -798,23 +944,41 @@
     statusEl.textContent = statusText(item);
 
     let html = "";
-    if (cur().partner) {
-      if (isZero(item.authBy) && !isOwner && partnerOf(myAddr())) {
-        html = `<button class="btn gold block" data-action="auth" data-id="${item.id}" ${dis}>Authenticate this piece</button>`;
+    if (is("auth")) {
+      const r = reqOf(item.id);
+      if (r && r.status === "pending" && same(r.partner, myAddr()) && !isOwner && partnerOf(myAddr())) {
+        html = `<div class="actions-col"><button class="btn gold block" data-action="auth" data-id="${item.id}" ${dis}>Authenticate this piece</button>
+          <button class="btn ghost block" data-action="decline" data-id="${item.id}" ${dis}>Can't verify</button></div>`;
       }
-    } else if (isOwner && item.status === STATUS.OWNED) {
-      const sel = partnerSelect("list-partner");
-      html = sel ? `
+    } else if (is("seller") && isOwner && item.status === STATUS.OWNED) {
+      const st = authStage(item);
+      if (st === "verified") {
+        html = `
         <div class="field">
           <label for="list-price">Sell this piece</label>
           <div class="row">
             <div class="money-input"><span>$</span><input id="list-price" type="number" min="0.01" step="0.01" placeholder="Price, e.g. 8"></div>
             <button class="btn gold" data-action="list" data-id="${item.id}" ${dis}>List for sale</button>
           </div>
-          <label for="list-partner" class="sub-label">Partner who stands behind the sale</label>
-          ${sel}
+          <span class="hint">${esc(nameOf(item.authBy))} authenticated this piece and stands behind the sale.</span>
           <span class="hint" data-deposit-hint>${depositHint("")}</span>
-        </div>` : `<div class="callout info">No partner is approved yet, so pieces can't be listed. Approve the demo pawn shop first.</div>`;
+        </div>`;
+      } else if (st === "pending") {
+        html = `
+        <div class="callout held"><strong>Waiting for ${esc(nameOf(reqOf(item.id).partner))}.</strong><br>Take the piece to the shop. Once they've checked it and stamped its passport, you can list it.</div>
+        <button class="btn ghost block" data-action="cancel-auth" data-id="${item.id}" ${dis}>Cancel the request</button>`;
+      } else {
+        const sel = partnerSelect("auth-partner");
+        const r = reqOf(item.id);
+        html = (st === "declined" ? `<div class="callout bad"><strong>${esc(nameOf(r.partner))} couldn't verify this piece.</strong>${r.note ? `<br>“${esc(r.note)}”` : ""}</div>` : "") + (sel ? `
+        <div class="field">
+          <label for="auth-partner">Step 1: get it authenticated</label>
+          ${sel}
+          <span class="hint">The authenticator checks the piece in person and stamps its passport. After that you can list it, and they settle any dispute on the sale.</span>
+        </div>
+        <button class="btn gold block" data-action="request-auth" data-id="${item.id}" ${dis}>Request authentication</button>`
+          : `<div class="callout info">No authenticator is approved yet, so pieces can't be verified or listed.</div>`);
+      }
     } else if (isOwner && item.status === STATUS.LISTED) {
       html = `
         <div class="callout info">Listed for <strong>${usd(item.price)}</strong>, protected by ${esc(nameOf(item.partner))}. Your ${usd(item.deposit)} deposit is locked.</div>
@@ -822,8 +986,10 @@
     } else if ((isOwner || isBuyer) && IN_SALE.includes(item.status)) {
       const b = saleBlock(item);
       html = `<div class="callout ${b.bad ? "bad" : "held"}"><strong>${b.chip}</strong><br>${b.note}</div><div class="actions-col">${b.actions.replace(/class="btn /g, 'class="btn block ')}</div>`;
-    } else if (item.status === STATUS.LISTED) {
+    } else if (is("buyer") && item.status === STATUS.LISTED) {
       html = `<button class="btn gold block" data-action="buy" data-id="${item.id}" ${dis}>Buy for ${usd(item.price)}</button>`;
+    } else if (is("buyer") && isOwner) {
+      html = `<div class="callout ok">This piece is yours. Its passport now names you as the owner.</div>`;
     } else if (IN_SALE.includes(item.status)) {
       html = `<div class="callout info">Someone has already paid for this piece.</div>`;
     }
@@ -831,7 +997,7 @@
   }
 
   document.addEventListener("input", (ev) => {
-    if (ev.target.id === "list-price" || ev.target.id === "f-price") {
+    if (ev.target.id === "list-price") {
       const hint = document.querySelector("[data-deposit-hint]");
       if (hint) hint.textContent = depositHint(ev.target.value);
     }
@@ -900,16 +1066,14 @@
         </div>
         <div class="field" id="f-kind-wrap"><label>Or pick an icon</label><div class="icon-pick">${picks}</div></div>
         ${sel ? `
-        <label class="check"><input id="f-sell" type="checkbox"> List it for sale now</label>
-        <div class="field" id="f-price-wrap" hidden>
-          <label for="f-price">Price</label>
-          <div class="money-input"><span>$</span><input id="f-price" type="number" min="0.01" step="0.01" placeholder="e.g. 8"></div>
-          <label for="f-partner" class="sub-label">Partner who stands behind the sale</label>
+        <label class="check"><input id="f-sell" type="checkbox" checked> Ask an authenticator to verify it now</label>
+        <div class="field" id="f-price-wrap">
+          <label for="f-partner" class="sub-label">Authenticator</label>
           ${sel}
-          <span class="hint" data-deposit-hint>${depositHint("")}</span>
+          <span class="hint">They check the piece in person. Once it's stamped, you can list it for sale.</span>
         </div>` : ""}
         <p class="hint" id="f-error" style="color:var(--err);min-height:1em;margin:0 0 8px"></p>
-        <button class="btn primary block" type="submit" ${state.busy ? "disabled" : ""}>Add to wardrobe</button>
+        <button class="btn primary block" type="submit" ${state.busy ? "disabled" : ""}>Create passport</button>
       </form>`, (m) => {
       const sell = $("#f-sell", m);
       const err = $("#f-error", m);
@@ -922,12 +1086,6 @@
         $("#f-brand", m).value = s.brand;
         $("#f-details", m).value = s.details;
         const r = $(`#kind-${s.kind}`, m); if (r) r.checked = true;
-        if (sell) {
-          sell.checked = true;
-          $("#f-price-wrap", m).hidden = false;
-          $("#f-price", m).value = s.price;
-          $("[data-deposit-hint]", m).textContent = depositHint(String(s.price));
-        }
       }));
 
       const setPhoto = (data) => {
@@ -955,29 +1113,24 @@
         const brand = $("#f-brand", m).value.trim();
         const details = $("#f-details", m).value.trim();
         const kind = m.querySelector('input[name="kind"]:checked')?.value || "other";
-        const selling = !!(sell && sell.checked);
-        const price = selling ? parseFloat($("#f-price", m).value) : 0;
-        const partner = selling ? $("#f-partner", m).value : null;
+        const asking = !!(sell && sell.checked);
+        const partner = asking ? $("#f-partner", m).value : null;
         if (!name) { err.textContent = "Please give the piece a name."; return; }
-        if (selling && !(price > 0)) { err.textContent = "Please enter a price above $0."; return; }
-        const priceWei = selling ? toWei(price.toFixed(2)) : 0n;
-        const need = toWei("0.02") + depositOf(priceWei);
-        if (!(await hasMoney(need))) { err.textContent = `You need about ${usd(need)} for the deposit and fees. Tap “Add money”.`; return; }
+        const need = toWei("0.02");
+        if (!(await hasMoney(need))) { err.textContent = `You need a few cents for the network fee. Tap “Add money”.`; return; }
         closeModal();
         const rc = await runTx({
           pending: `Creating the passport for “${name}”…`,
-          done: `“${name}” is in your wardrobe, with its passport.`,
+          done: `“${name}” now has its passport.`,
           send: (c) => c.createPassport(name, brand, details, photoData || null, kind),
         });
-        if (rc && selling) {
-          if (rc.id) {
-            const id = rc.id;
-            await runTx({
-              pending: `Listing “${name}” for ${usd(priceWei)} and locking your ${usd(depositOf(priceWei))} deposit…`,
-              done: `“${name}” is now for sale.`,
-              send: (c) => c.listForSale(id, priceWei, partner),
-            });
-          }
+        if (rc && asking && rc.id) {
+          const id = rc.id;
+          await runTx({
+            pending: `Asking ${nameOf(partner)} to authenticate “${name}”…`,
+            done: `Request sent. ${nameOf(partner)} will check “${name}” in person.`,
+            send: (c) => c.requestAuth(id, partner),
+          });
         }
       });
     });
@@ -1041,17 +1194,27 @@
     `);
   }
 
+  function openDecline(id) {
+    const item = itemById(id);
+    if (!item) return;
+    openModal("Can't verify this piece", `
+      <p style="margin-top:0">Tell ${esc(nameOf(item.owner))} why. The piece stays unlisted, and nothing is written to its passport.</p>
+      <div class="field"><label for="x-note">Reason</label><input id="x-note" type="text" maxlength="120" value="Could not confirm it is genuine."></div>
+      <button class="btn primary block" data-action="decline-send" data-id="${id}">Send to the owner</button>
+    `);
+  }
+
   // ------------------------------------------------------------ how it works
   function openHow() {
     openModal("How it works on Arc", `
       <ol class="how-list">
         <li><strong>Every piece gets a passport.</strong> Its name, brand, details, photo, owner and history are stored in a smart contract on Arc. The details can't be edited after the passport is issued.</li>
-        <li><strong>Local partners add trust.</strong> An approved partner, such as a pawn shop, inspects a piece in person and stamps its passport. The stamp stays with the piece.</li>
+        <li><strong>Authentication comes first.</strong> The seller asks an approved local authenticator, such as a pawn shop, to check the piece in person. The authenticator stamps its passport. A piece can't be listed until then.</li>
         <li><strong>Payment is held, not sent.</strong> The buyer's dollars go into the contract. The seller also locks a 10% deposit when listing.</li>
         <li><strong>Ship, then confirm or dispute.</strong> The seller marks it shipped. The buyer has ${CONFIRM_DAYS} days to confirm or open a dispute. If the buyer says nothing, the seller can collect.</li>
-        <li><strong>Disputes go to the partner.</strong> The partner on the listing decides. If the seller loses, the buyer is refunded and the seller loses the deposit. Partners earn 3% of each sale they stand behind.</li>
+        <li><strong>The same authenticator settles disputes.</strong> They vouched for the piece, so they decide. If the seller loses, the buyer is refunded and the seller loses the deposit. Authenticators earn 3% of each sale they stand behind.</li>
         <li><strong>Track records can't be faked.</strong> The contract counts each person's sales, refunds and disputes.</li>
-        <li><strong>Why Arc.</strong> USDC (digital dollars) is the native currency, so there's no separate token to buy for fees. Most actions cost under a cent and are final in under a second.</li>
+        <li><strong>Why Arc.</strong> USDC (digital dollars) is the native currency, so there's no separate token to buy for fees. Most actions cost about a cent or less.</li>
       </ol>
       <div class="row" style="margin-top:6px">
         <a class="btn ghost" href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">See the contract on Arc ↗</a>
@@ -1168,18 +1331,20 @@
     catch (_) { toast("Couldn't copy. Select it and copy it by hand.", "error"); }
   }
 
-  const goTab = (tab) => { state.tab = tab; lsSet(LS.tab, tab); render(); };
+  const clearToasts = () => document.querySelectorAll("#toast-root .toast:not(.pending)").forEach((t) => t.remove());
+  const goTab = (tab) => { state.tab = tab; if (state.role) lsSet(LS.tab + state.role, tab); render(); };
 
   // ---------------------------------------------------------------- events
   document.addEventListener("click", async (ev) => {
-    const el = ev.target.closest("[data-persona],[data-tab],[data-tab-go],[data-open],[data-action]");
+    const el = ev.target.closest("[data-role],[data-tab],[data-tab-go],[data-open],[data-action]");
     if (!el) return;
 
-    if (el.dataset.persona) {
-      state.current = el.dataset.persona;
-      lsSet(LS.current, state.current);
+    if (el.dataset.role) {
+      clearToasts();
+      setRole(el.dataset.role);
       closeModal();
       render();
+      window.scrollTo(0, 0);
       return;
     }
     if (el.dataset.tab || el.dataset.tabGo) {
@@ -1192,6 +1357,7 @@
     const id = Number(el.dataset.id);
     const item = itemById(id);
     switch (el.dataset.action) {
+      case "sign-out": clearToasts(); setRole(null); closeModal(); render(); window.scrollTo(0, 0); break;
       case "add-item": openAddItem(); break;
       case "how": openHow(); break;
       case "add-money": openAddMoney(); break;
@@ -1202,7 +1368,7 @@
       case "leave-public": leavePublic(); break;
       case "public-buy":
         leavePublic();
-        if (cur().partner) { state.current = "alex"; lsSet(LS.current, "alex"); }
+        setRole("buyer");
         goTab("shop");
         if (item && !same(item.owner, myAddr())) openBuy(id);
         break;
@@ -1219,14 +1385,13 @@
         break;
       case "list": {
         const price = parseFloat($("#list-price")?.value);
-        const partner = $("#list-partner")?.value;
         if (!(price > 0)) { toast("Please enter a price above $0.", "error"); return; }
         const w = toWei(price.toFixed(2));
         if (!(await hasMoney(depositOf(w) + toWei("0.01")))) { toast(`You need ${usd(depositOf(w))} for the deposit. Tap “Add money”.`, "error"); return; }
         await runTx({
           pending: `Listing “${item.name}” for ${usd(w)} and locking your ${usd(depositOf(w))} deposit…`,
           done: `“${item.name}” is now for sale.`,
-          send: (c) => c.listForSale(id, w, partner),
+          send: (c) => c.listForSale(id, w),
         });
         break;
       }
@@ -1243,7 +1408,7 @@
           pending: `Releasing the payment to ${nameOf(item.owner)} and moving the passport to you…`,
           done: `Done! ${nameOf(item.owner)} was paid, and “${item.name}” is now in your wardrobe.`,
           send: (c) => c.confirmDelivery(id),
-        })) goTab("wardrobe");
+        })) goTab("mine");
         break;
       case "claim":
         closeModal();
@@ -1270,11 +1435,31 @@
         });
         break;
       }
+      case "request-auth": {
+        const partner = $("#auth-partner")?.value;
+        if (!partner) return;
+        await runTx({
+          pending: `Asking ${nameOf(partner)} to authenticate “${item.name}”…`,
+          done: `Request sent. ${nameOf(partner)} will check “${item.name}” in person.`,
+          send: (c) => c.requestAuth(id, partner),
+        });
+        break;
+      }
+      case "cancel-auth":
+        await runTx({ pending: "Cancelling the request…", done: "Request cancelled.", send: (c) => c.cancelAuthRequest(id) });
+        break;
+      case "decline": openDecline(id); break;
+      case "decline-send": {
+        const reason = $("#x-note")?.value.trim() || "Could not be verified.";
+        closeModal();
+        await runTx({ pending: "Letting the owner know…", done: `${nameOf(item.owner)} has been told “${item.name}” couldn't be verified.`, send: (c) => c.declineAuth(id, reason) });
+        break;
+      }
       case "auth": openAuth(id); break;
       case "auth-send": {
         const note = $("#a-note")?.value.trim() || "Inspected in store.";
         closeModal();
-        await runTx({ pending: `Stamping the passport of “${item.name}”…`, done: `“${item.name}” is now authenticated by your shop.`, send: (c) => c.authenticate(id, note) });
+        await runTx({ pending: `Stamping the passport of “${item.name}”…`, done: `“${item.name}” is now authenticated by your shop. ${nameOf(item.owner)} can list it.`, send: (c) => c.authenticate(id, note) });
         break;
       }
       case "resolve": {
@@ -1299,7 +1484,7 @@
     render();
     try {
       await connect();
-      loadPersonas();
+      loadSession();
       await refresh();
       setInterval(() => { if (!state.busy && !document.hidden) refresh(); }, CFG.refreshMs);
     } catch (e) {
@@ -1309,7 +1494,7 @@
   }
 
   // Small hook for automated tests and debugging (no secrets exposed).
-  window.WP = { state, refresh, addresses: () => Object.fromEntries(PERSONAS.map((p) => [p.id, state.wallets[p.id]?.address])) };
+  window.WP = { state, refresh, setRole: (r) => { setRole(r); render(); }, addresses: () => Object.fromEntries(PERSONAS.map((p) => [p.id, state.wallets[p.id]?.address])) };
 
   start();
 })();

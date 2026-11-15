@@ -30,6 +30,51 @@ const priceWei = (v: unknown): bigint => {
   return ethers.parseUnits(n.toFixed(2), 18);
 };
 
+const ZERO = /^0x0{40}$/i;
+const sameAddr = (a: string, b: string) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+
+/** A piece counts as verified when a partner authenticated it after it last changed hands. */
+async function verifiedBy(id: number): Promise<{ item: any; fresh: boolean }> {
+  const c = contract();
+  const [item, hist] = await Promise.all([c.getItem(id), c.getHistory(id)]);
+  const lastMove = hist.length ? Number(hist[hist.length - 1][3]) : 0;
+  return { item, fresh: !ZERO.test(item.authBy) && Number(item.authAt) >= lastMove };
+}
+
+/**
+ * The authentication stage. A request is a note between a seller and a partner, so it
+ * lives in the database. The stamp itself (authenticate) is written to the contract.
+ */
+async function authStage(handle: Handle, action: string, body: any) {
+  const user = await ensureUser(handle);
+  const id = itemId(body.id);
+  const { item, fresh } = await verifiedBy(id);
+  if (action === "requestAuth") {
+    if (!sameAddr(item.owner, user.address)) throw new UserError("Only the owner can ask for authentication.");
+    if (Number(item.status) !== 0) throw new UserError("This piece is already in a sale.");
+    if (fresh) throw new UserError("This piece is already authenticated.");
+    if (!ethers.isAddress(body.partner)) throw new UserError("Please choose an authenticator.");
+    const p = await contract().partners(body.partner);
+    if (!p.active) throw new UserError("That authenticator isn't approved.");
+    if (sameAddr(body.partner, user.address)) throw new UserError("You can't authenticate your own piece.");
+    await q(
+      `insert into auth_requests (item_id, requested_by, owner_address, partner_address, status, note, created_at, decided_at)
+       values ($1,$2,$3,$4,'pending',null,now(),null)
+       on conflict (item_id) do update set requested_by = excluded.requested_by, owner_address = excluded.owner_address,
+         partner_address = excluded.partner_address, status = 'pending', note = null, created_at = now(), decided_at = null`,
+      [id, handle, user.address.toLowerCase(), String(body.partner).toLowerCase()]);
+  } else if (action === "cancelAuthRequest") {
+    if (!sameAddr(item.owner, user.address)) throw new UserError("Only the owner can cancel this request.");
+    await q("delete from auth_requests where item_id = $1 and status = 'pending'", [id]);
+  } else {
+    const rows = await q("select partner_address from auth_requests where item_id = $1 and status = 'pending'", [id]);
+    if (!rows[0] || !sameAddr(rows[0].partner_address, user.address)) throw new UserError("There's no open request for you on this piece.");
+    await q("update auth_requests set status = 'declined', note = $2, decided_at = now() where item_id = $1",
+      [id, text(body.reason, 120, "the reason") || "Could not be verified."]);
+  }
+  return { hash: null, fee: null, id };
+}
+
 async function savePhoto(dataUrl: unknown, handle: Handle): Promise<string | null> {
   if (typeof dataUrl !== "string" || !dataUrl) return null;
   const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
@@ -42,6 +87,7 @@ async function savePhoto(dataUrl: unknown, handle: Handle): Promise<string | nul
 }
 
 export async function perform(handle: Handle, action: string, body: any) {
+  if (action === "requestAuth" || action === "cancelAuthRequest" || action === "declineAuth") return authStage(handle, action, body);
   const user = await ensureUser(handle);
   const c = contract();
   let fn: string, args: any[], value = 0n, id: number | null = null;
@@ -60,9 +106,12 @@ export async function perform(handle: Handle, action: string, body: any) {
     case "list": {
       id = itemId(body.id);
       const price = priceWei(body.price);
-      if (!ethers.isAddress(body.partner)) throw new UserError("Please choose a partner.");
+      // Authentication comes before listing, and the authenticator who vouched for
+      // the piece is the one who stands behind the sale.
+      const v = await verifiedBy(id);
+      if (!v.fresh) throw new UserError("This piece needs to be authenticated before it can be listed.");
       value = (price * DEPOSIT_BPS) / 10000n;
-      fn = "listForSale"; args = [id, price, body.partner];
+      fn = "listForSale"; args = [id, price, v.item.authBy];
       detail.price = price.toString();
       break;
     }
@@ -75,7 +124,13 @@ export async function perform(handle: Handle, action: string, body: any) {
       break;
     }
     case "dispute": id = itemId(body.id); fn = "openDispute"; args = [id, text(body.reason, 160, "the reason", true)]; break;
-    case "authenticate": id = itemId(body.id); fn = "authenticate"; args = [id, text(body.note, 120, "the note") || "Inspected in store."]; break;
+    case "authenticate": {
+      id = itemId(body.id);
+      const rows = await q("select partner_address from auth_requests where item_id = $1 and status = 'pending'", [id]);
+      if (!rows[0] || !sameAddr(rows[0].partner_address, user.address)) throw new UserError("The owner hasn't asked you to authenticate this piece.");
+      fn = "authenticate"; args = [id, text(body.note, 120, "the note") || "Inspected in store."];
+      break;
+    }
     case "resolve": id = itemId(body.id); fn = "resolveDispute"; args = [id, body.buyerWins === true]; detail.buyerWins = body.buyerWins === true; break;
     case "unlist": id = itemId(body.id); fn = "cancelListing"; args = [id]; break;
     case "ship": id = itemId(body.id); fn = "markShipped"; args = [id]; break;
@@ -96,6 +151,9 @@ export async function perform(handle: Handle, action: string, body: any) {
     for (const log of rc?.logs ?? []) {
       try { const p = iface.parseLog(log); if (p?.name === "PassportCreated") id = Number(p.args.id); } catch { /* other log */ }
     }
+  }
+  if (action === "authenticate") {
+    await q("update auth_requests set status = 'approved', note = $2, decided_at = now() where item_id = $1", [id, args[1]]);
   }
   await q("insert into activity (tx_hash, action, item_id, actor, detail, fee_wei) values ($1,$2,$3,$4,$5,$6)",
     [res.hash, action, id, handle, JSON.stringify(detail), res.feeWei?.toString() ?? null]);
