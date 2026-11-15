@@ -30,6 +30,7 @@ async function walletSetId(): Promise<string> {
 }
 
 const usdc = (wei: bigint) => ethers.formatUnits(wei, 18);
+const ARC_USDC = "0x3600000000000000000000000000000000000000";
 const FEE = { type: "level", config: { feeLevel: "MEDIUM" } } as const;
 
 async function waitFor(id: string): Promise<TxResult> {
@@ -72,12 +73,14 @@ export const circleProvider: WalletProvider = {
     return waitFor(id);
   },
   async transfer(w: ManagedWallet, to, valueWei) {
-    // A plain native transfer is a contract execution with empty call data and an amount.
-    const res = await client().createContractExecutionTransaction({
+    // On Arc, USDC is the native currency and is also reachable as a token at this
+    // fixed address. Circle's transfer call moves it by token address.
+    const res = await client().createTransaction({
       walletId: w.walletId,
-      contractAddress: to,
-      callData: "0x",
-      amount: usdc(valueWei),
+      blockchain: CFG.circleBlockchain,
+      tokenAddress: ARC_USDC,
+      destinationAddress: to,
+      amounts: [usdc(valueWei)],
       fee: FEE,
     } as any);
     const id = res.data?.id;
