@@ -7,13 +7,13 @@ const ganache = require("ganache");
 const { ethers } = require("ethers");
 
 (async () => {
-  const src = fs.readFileSync(path.join(__dirname, "..", "contracts", "WardrobePassport.sol"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "contracts", "WardrobePassportV2.sol"), "utf8");
   const out = JSON.parse(solc.compile(JSON.stringify({
     language: "Solidity",
     sources: { "WardrobePassport.sol": { content: src } },
     settings: { optimizer: { enabled: true, runs: 200 }, evmVersion: "paris", outputSelection: { "*": { "*": ["abi", "evm.bytecode.object"] } } },
   })));
-  const art = out.contracts["WardrobePassport.sol"].WardrobePassport;
+  const art = out.contracts["WardrobePassport.sol"].WardrobePassportV2;
 
   const server = ganache.server({
     chain: { chainId: 5042002 },
