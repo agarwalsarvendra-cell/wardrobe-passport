@@ -30,17 +30,13 @@
   </header>
 
   <main>
+    <section class="hero" id="hero" aria-label="About Wardrobe Passport"></section>
+
     <nav class="tabs" role="tablist" aria-label="Sections">
       <button role="tab" data-tab="wardrobe" class="tab">My wardrobe</button>
       <button role="tab" data-tab="shop" class="tab">Shop pre-owned</button>
-      <button role="tab" data-tab="orders" class="tab">My orders</button>
+      <button role="tab" data-tab="orders" class="tab">Orders</button>
     </nav>
-
-    <div class="how" id="how">
-      <div class="how-step"><span>1</span>List a piece from your wardrobe</div>
-      <div class="how-step"><span>2</span>Buyer pays. The money is held safely</div>
-      <div class="how-step"><span>3</span>Buyer confirms it arrived. Money and passport move together</div>
-    </div>
 
     <section id="view" aria-live="polite"></section>
   </main>
@@ -51,6 +47,7 @@
   <div id="toast-root" aria-live="polite"></div>
 
   <script src="vendor/ethers.umd.min.js"></script>
+  <script src="vendor/qrcode.js"></script>
   <script src="config.js"></script>
   <script src="abi.js"></script>
   <script src="app.js"></script>

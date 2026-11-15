@@ -1,13 +1,14 @@
 /* Wardrobe Passport — app logic
  *
  * How it fits together:
- * - The WardrobePassport contract on Arc stores every item's passport, its
- *   status and its ownership history, and holds the buyer's money until
- *   delivery is confirmed.
- * - This page reads that data from Arc and sends transactions for the
- *   current person. Each demo person (Maya, Alex) has an in-app wallet kept
- *   in this browser, so nobody sees MetaMask, gas or crypto addresses while
- *   using the app. Amounts are shown in dollars (Arc's native currency is USDC).
+ * - The WardrobePassport contract on Arc stores every item's passport (incl. a
+ *   small photo), its status and its ownership history, and holds the buyer's
+ *   money until delivery is confirmed.
+ * - This page reads that data from Arc and sends transactions for the current
+ *   person. Each demo person (Maya, Alex) has an in-app wallet kept in this
+ *   browser, so nobody sees MetaMask, gas or crypto addresses while using the
+ *   app. Amounts are shown in dollars (Arc's native currency is USDC).
+ * - #passport=<id> opens a public, read-only passport page anyone can verify.
  */
 (() => {
   "use strict";
@@ -18,11 +19,12 @@
 
   const STATUS = { OWNED: 0, LISTED: 1, PENDING: 2 };
   const PERSONAS = [
-    { id: "maya", name: "Maya" },
-    { id: "alex", name: "Alex" },
+    { id: "maya", name: "Maya", color: "#c9a45c" },
+    { id: "alex", name: "Alex", color: "#8fb8a8" },
   ];
   const LS = { keys: "wp.personaKeys.v1", current: "wp.currentPersona", tab: "wp.tab" };
   const REFUND_DAYS = 14;
+  const MAX_PHOTO_CHARS = 7000; // ~5 KB photo stored in the passport (fee about $0.10 on Arc)
 
   const state = {
     provider: null,
@@ -33,10 +35,13 @@
     current: "maya",
     tab: "wardrobe",
     items: [],
+    histories: {},
     loaded: false,
     online: true,
     busy: false,
     fatal: null,
+    openItemId: null,
+    publicId: null,
   };
 
   // ---------------------------------------------------------------- helpers
@@ -51,49 +56,68 @@
     const n = Number(ethers.formatUnits(wei ?? 0n, 18));
     return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
+  const usdFee = (wei) => {
+    const n = Number(ethers.formatUnits(wei ?? 0n, 18));
+    return n > 0 && n < 0.01 ? `$${n.toFixed(4).replace(/0+$/, "")}` : usd(wei);
+  };
   const toWei = (dollars) => ethers.parseUnits(String(dollars), 18);
   const fmtDate = (ts) => new Date(Number(ts) * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const me = () => state.wallets[state.current];
-  const myAddr = () => me().address;
+  const myAddr = () => me()?.address;
   const person = (id) => PERSONAS.find((p) => p.id === id);
+  const itemById = (id) => state.items.find((i) => i.id === id);
   const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
   const explorerAddr = (a) => `${CFG.explorer}/address/${a}`;
   const explorerTx = (h) => `${CFG.explorer}/tx/${h}`;
+  const passportUrl = (id) => `${location.origin}${location.pathname}#passport=${id}`;
+  const pad = (id) => String(id).padStart(6, "0");
 
   function nameOf(addr) {
     if (isZero(addr)) return "—";
     for (const p of PERSONAS) if (same(state.wallets[p.id]?.address, addr)) return p.name;
     return `Member ${short(addr)}`;
   }
-  function isSafeImageUrl(u) { return /^https:\/\/[^\s"'<>]+$/i.test(u || ""); }
+  function isSafeImage(u) {
+    return /^https:\/\/[^\s"'<>]+$/i.test(u || "") || /^data:image\/(webp|jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(u || "");
+  }
 
   // ------------------------------------------------------------------ icons
   const ICONS = {
-    jacket: { label: "Jacket", svg: '<path d="M22 8 10 13 6 56h10l2-26v28h28V30l2 26h10L54 13 42 8 32 30z"/><path d="M22 8l5 16-3 4 8 12 8-12-3-4 5-16"/><circle cx="32" cy="47" r="1.4"/><circle cx="32" cy="53" r="1.4"/>' },
-    top: { label: "Top", svg: '<path d="M22 10 12 14 4 26l9 5 4-5v30h30V26l4 5 9-5-8-12-10-4c-2 5-6 8-10 8s-8-3-10-8z"/>' },
-    dress: { label: "Dress", svg: '<path d="M26 6v8M38 6v8"/><path d="M26 14q6 4 12 0l4 12-6 4 14 28H14l14-28-6-4z"/>' },
-    trousers: { label: "Trousers", svg: '<path d="M18 6h28l4 52H37L32 22l-5 36H14z"/><path d="M18 12h28"/>' },
-    shoes: { label: "Shoes", svg: '<path d="M6 44V34c0-4 3-6 6-6h10l8-8 8 2c2 8 8 12 16 14 4 1 6 4 6 8z"/><path d="M6 44h54v6H6z"/><path d="M28 26l4 4M32 23l4 4"/>' },
-    bag: { label: "Bag", svg: '<path d="M12 24h40l-4 34H16z"/><path d="M22 24c0-12 20-12 20 0"/><path d="M28 34h8"/>' },
-    watch: { label: "Watch", svg: '<path d="M24 18V4h16v14M24 46v14h16V46"/><circle cx="32" cy="32" r="14"/><path d="M32 32v-8M32 32l6 3M46 30h3v4h-3"/>' },
-    other: { label: "Other", svg: '<path d="M28 14c0-5 8-5 8 0 0 3-4 4-4 8"/><path d="M32 22 6 44h52z"/>' },
+    jacket: { label: "Jacket", tint: "#efe2c4", svg: '<path d="M22 8 10 13 6 56h10l2-26v28h28V30l2 26h10L54 13 42 8 32 30z"/><path d="M22 8l5 16-3 4 8 12 8-12-3-4 5-16"/><circle cx="32" cy="47" r="1.4"/><circle cx="32" cy="53" r="1.4"/>' },
+    top: { label: "Top", tint: "#e4ebf3", svg: '<path d="M22 10 12 14 4 26l9 5 4-5v30h30V26l4 5 9-5-8-12-10-4c-2 5-6 8-10 8s-8-3-10-8z"/>' },
+    dress: { label: "Dress", tint: "#f3e3e3", svg: '<path d="M26 6v8M38 6v8"/><path d="M26 14q6 4 12 0l4 12-6 4 14 28H14l14-28-6-4z"/>' },
+    trousers: { label: "Trousers", tint: "#e6e9f0", svg: '<path d="M18 6h28l4 52H37L32 22l-5 36H14z"/><path d="M18 12h28"/>' },
+    shoes: { label: "Shoes", tint: "#e7efe9", svg: '<path d="M6 44V34c0-4 3-6 6-6h10l8-8 8 2c2 8 8 12 16 14 4 1 6 4 6 8z"/><path d="M6 44h54v6H6z"/><path d="M28 26l4 4M32 23l4 4"/>' },
+    bag: { label: "Bag", tint: "#f1e6da", svg: '<path d="M12 24h40l-4 34H16z"/><path d="M22 24c0-12 20-12 20 0"/><path d="M28 34h8"/>' },
+    watch: { label: "Watch", tint: "#e9e6f2", svg: '<path d="M24 18V4h16v14M24 46v14h16V46"/><circle cx="32" cy="32" r="14"/><path d="M32 32v-8M32 32l6 3M46 30h3v4h-3"/>' },
+    other: { label: "Other", tint: "#efe9df", svg: '<path d="M28 14c0-5 8-5 8 0 0 3-4 4-4 8"/><path d="M32 22 6 44h52z"/>' },
   };
   function iconKey(imageUrl) {
     const m = /^icon:(\w+)$/.exec(imageUrl || "");
     return m && ICONS[m[1]] ? m[1] : "other";
   }
-  function art(item) {
-    if (isSafeImageUrl(item.imageUrl)) {
-      return `<div class="art"><img src="${esc(item.imageUrl)}" alt="${esc(item.name)}" loading="lazy" referrerpolicy="no-referrer"></div>`;
+  function art(item, cls = "") {
+    if (isSafeImage(item.imageUrl)) {
+      return `<div class="art photo ${cls}"><img src="${esc(item.imageUrl)}" alt="${esc(item.name)}" loading="lazy" referrerpolicy="no-referrer"></div>`;
     }
-    return `<div class="art"><svg viewBox="0 0 64 64" aria-hidden="true">${ICONS[iconKey(item.imageUrl)].svg}</svg></div>`;
+    const ic = ICONS[iconKey(item.imageUrl)];
+    return `<div class="art ${cls}" style="--tint:${ic.tint}"><svg viewBox="0 0 64 64" aria-hidden="true">${ic.svg}</svg></div>`;
   }
+
+  // Sample pieces make demos fast; they're normal passports once created.
+  const SAMPLES = [
+    { name: "Navy wool blazer", brand: "Hugo Boss", details: "Size 40R, worn twice", kind: "jacket", price: 15 },
+    { name: "Steel dive watch", brand: "Rolex", details: "Box and papers, serviced 2025", kind: "watch", price: 12 },
+    { name: "Leather tote", brand: "Coach", details: "Tan, like new", kind: "bag", price: 9 },
+    { name: "White leather sneakers", brand: "Common Projects", details: "US 9, light wear", kind: "shoes", price: 8 },
+  ];
 
   // ------------------------------------------------------------- chain setup
   async function connect() {
     const network = new ethers.Network(CFG.chainName, CFG.chainId);
     for (const url of CFG.rpcUrls) {
       try {
+        // cacheTimeout -1: always read fresh balances/status (no short-term cache)
         const p = new ethers.JsonRpcProvider(url, network, { staticNetwork: network, batchMaxCount: 1, cacheTimeout: -1 });
         await withTimeout(p.getBlockNumber(), 7000);
         state.provider = p;
@@ -131,15 +155,21 @@
       const c = state.contract;
       const count = Number(await c.itemCount());
       const ids = Array.from({ length: count }, (_, i) => i + 1);
-      const rows = await Promise.all(ids.map((id) => c.getItem(id)));
-      const items = rows.map((r, i) => ({
+      const [rows, hists, bals] = await Promise.all([
+        Promise.all(ids.map((id) => c.getItem(id))),
+        Promise.all(ids.map((id) => c.getHistory(id))),
+        Promise.all(PERSONAS.map((p) => state.provider.getBalance(state.wallets[p.id].address))),
+      ]);
+      if (seq !== refreshSeq) return; // a newer refresh is on its way
+      state.items = rows.map((r, i) => ({
         id: ids[i],
         name: r[0], brand: r[1], details: r[2], imageUrl: r[3],
         owner: r[4], buyer: r[5], price: r[6], paidAt: r[7], status: Number(r[8]),
       }));
-      const bals = await Promise.all(PERSONAS.map((p) => state.provider.getBalance(state.wallets[p.id].address)));
-      if (seq !== refreshSeq) return; // a newer refresh is on its way
-      state.items = items;
+      state.histories = {};
+      hists.forEach((h, i) => {
+        state.histories[ids[i]] = h.map((t) => ({ from: t[0], to: t[1], price: t[2], at: t[3] }));
+      });
       PERSONAS.forEach((p, i) => (state.balances[p.id] = bals[i]));
       state.loaded = true;
       state.online = true;
@@ -149,6 +179,28 @@
       state.online = false;
     }
     render();
+  }
+
+  // Derived facts about an item from its history
+  function facts(item) {
+    const h = state.histories[item.id] || [];
+    const sales = h.filter((t) => !isZero(t.from));
+    return {
+      created: h[0]?.at,
+      creator: h[0]?.to,
+      owners: Math.max(1, h.length),
+      sales,
+      lastSale: sales[sales.length - 1],
+    };
+  }
+
+  function stats() {
+    let sales = 0, volume = 0n, held = 0n;
+    for (const it of state.items) {
+      for (const t of state.histories[it.id] || []) if (!isZero(t.from)) { sales++; volume += t.price; }
+      if (it.status === STATUS.PENDING) held += it.price;
+    }
+    return { passports: state.items.length, sales, volume, held };
   }
 
   // ---------------------------------------------------------- transactions
@@ -194,7 +246,8 @@
     try {
       const tx = await send(state.contract.connect(me()));
       const rc = await tx.wait();
-      updateToast(t, done, "ok", rc.hash);
+      const fee = rc.fee ?? (rc.gasUsed * (rc.gasPrice ?? 0n));
+      updateToast(t, `${done} Network fee: ${usdFee(fee)}.`, "ok", rc.hash);
       await refresh();
       return rc;
     } catch (e) {
@@ -225,7 +278,7 @@
   function updateToast(el, text, kind, hash) {
     el.className = `toast ${kind}`;
     el.innerHTML = `<span class="dot"></span><span>${esc(text)}</span>${hash ? `<a href="${explorerTx(hash)}" target="_blank" rel="noopener">View on Arc ↗</a>` : ""}`;
-    if (kind !== "pending") setTimeout(() => el.remove(), kind === "error" ? 7000 : 5000);
+    if (kind !== "pending") setTimeout(() => el.remove(), kind === "error" ? 8000 : 6000);
   }
 
   // ---------------------------------------------------------------- modals
@@ -258,6 +311,12 @@
     return `<span class="chip owned">In wardrobe</span>`;
   }
 
+  function provenance(item) {
+    const f = facts(item);
+    if (f.lastSale) return `Last sold ${usd(f.lastSale.price)} · ${f.owners} owners`;
+    return f.created ? `Passport since ${fmtDate(f.created)}` : "";
+  }
+
   function card(item, footer) {
     return `
       <button class="card" data-open="${item.id}" aria-label="Open ${esc(item.name)}">
@@ -265,6 +324,7 @@
         <div class="card-body">
           <p class="card-title">${esc(item.name)}</p>
           <p class="card-brand">${esc(item.brand || "No brand")}</p>
+          <p class="card-prov">${esc(provenance(item))}</p>
           <div class="card-foot">${footer ?? chipFor(item)}</div>
         </div>
       </button>`;
@@ -274,20 +334,50 @@
     $("#who").innerHTML =
       PERSONAS.map((p) => `
         <button class="persona ${p.id === state.current ? "active" : ""}" data-persona="${p.id}" aria-pressed="${p.id === state.current}">
-          <span class="avatar">${p.name[0]}</span>
+          <span class="avatar" style="background:${p.color}">${p.name[0]}</span>
           <span><div class="p-name">${p.name}</div><div class="p-bal">${state.loaded ? usd(state.balances[p.id]) : "…"}</div></span>
         </button>`).join("") +
       `<button class="addmoney" data-action="add-money">+ Add money</button>`;
   }
 
+  function ordersCount() {
+    if (!me()) return 0;
+    return state.items.filter((i) => i.status === STATUS.PENDING && (same(i.buyer, myAddr()) || same(i.owner, myAddr()))).length;
+  }
+
   function renderTabs() {
-    const ordersCount = me() ? state.items.filter((i) => i.status === STATUS.PENDING && same(i.buyer, myAddr())).length : 0;
+    const n = ordersCount();
     document.querySelectorAll(".tab").forEach((b) => {
       const active = b.dataset.tab === state.tab;
       b.classList.toggle("active", active);
       b.setAttribute("aria-selected", active);
-      if (b.dataset.tab === "orders") b.innerHTML = `My orders${ordersCount ? `<span class="count">${ordersCount}</span>` : ""}`;
+      if (b.dataset.tab === "orders") b.innerHTML = `Orders${n ? `<span class="count">${n}</span>` : ""}`;
     });
+  }
+
+  function renderHero() {
+    const el = $("#hero");
+    if (!state.loaded) { el.innerHTML = ""; return; }
+    const s = stats();
+    const broke = PERSONAS.every((p) => (state.balances[p.id] ?? 0n) === 0n);
+    el.innerHTML = `
+      <div class="hero-copy">
+        <h2>Resale you can trust.</h2>
+        <p>Every piece gets a passport on Arc. When it sells, the buyer's money is held until the piece arrives, then the money and the piece's history move together.</p>
+        <ol class="steps">
+          <li><span>1</span>List a piece</li>
+          <li><span>2</span>Buyer pays, money held</li>
+          <li><span>3</span>Delivered: money + passport move</li>
+          <li class="how-link"><button class="linkish" data-action="how">How it works on Arc</button></li>
+        </ol>
+        ${broke ? `<p class="tip">Demo tip: give Maya and Alex test dollars with <button class="linkish" data-action="add-money">+ Add money</button>.</p>` : ""}
+      </div>
+      <div class="hero-stats" aria-label="Live totals from Arc">
+        <div class="stat"><strong>${s.passports}</strong><small>passports on Arc</small></div>
+        <div class="stat"><strong>${s.sales}</strong><small>sales completed</small></div>
+        <div class="stat"><strong>${usd(s.volume)}</strong><small>paid out safely</small></div>
+        <div class="stat"><strong>${usd(s.held)}</strong><small>held right now</small></div>
+      </div>`;
   }
 
   function renderWardrobe() {
@@ -301,7 +391,7 @@
       return head + `
         <div class="empty">
           <h3>Your wardrobe is empty</h3>
-          <p>Add a piece and it gets a digital passport: who owned it, when, and for how much.</p>
+          <p>Add a piece and it gets a digital passport: a photo, who owned it, when, and for how much.</p>
           <button class="btn gold" data-action="add-item" ${state.busy ? "disabled" : ""}>Add your first piece</button>
         </div>`;
     }
@@ -312,7 +402,7 @@
     const forSale = state.items.filter((i) => i.status === STATUS.LISTED && !same(i.owner, myAddr())).reverse();
     const head = `
       <div class="section-head">
-        <div><h2>Shop pre-owned</h2><p>Your money is held safely until the piece arrives</p></div>
+        <div><h2>Shop pre-owned</h2><p>Every piece comes with its verified history. Your money is held until it arrives.</p></div>
       </div>`;
     if (!forSale.length) {
       const other = PERSONAS.find((p) => p.id !== state.current);
@@ -327,23 +417,11 @@
       <span class="chip ok">Sold by ${esc(nameOf(i.owner))}</span>`)).join("")}</div>`;
   }
 
-  function renderOrders() {
-    const mine = state.items.filter((i) => i.status === STATUS.PENDING && same(i.buyer, myAddr()));
-    const head = `
-      <div class="section-head">
-        <div><h2>My orders</h2><p>Pieces you've paid for that haven't been confirmed yet</p></div>
-      </div>`;
-    if (!mine.length) {
-      return head + `
-        <div class="empty">
-          <h3>No orders on the way</h3>
-          <p>When you buy something, it shows here until you confirm it arrived.</p>
-          <button class="btn ghost" data-tab-go="shop">Browse pre-owned</button>
-        </div>`;
-    }
-    return head + mine.map((i) => {
-      const refundAt = Number(i.paidAt) + REFUND_DAYS * 86400;
-      const canRefund = Date.now() / 1000 >= refundAt;
+  function orderRow(i, role) {
+    const refundAt = Number(i.paidAt) + REFUND_DAYS * 86400;
+    const canRefund = Date.now() / 1000 >= refundAt;
+    const dis = state.busy ? "disabled" : "";
+    if (role === "buyer") {
       return `
         <div class="order">
           ${art(i)}
@@ -352,15 +430,66 @@
             <p>${esc(i.brand)} · from ${esc(nameOf(i.owner))} · paid ${fmtDate(i.paidAt)}</p>
             <span class="chip held">${usd(i.price)} held safely until you confirm</span>
             <div class="actions">
-              <button class="btn gold" data-action="confirm" data-id="${i.id}" ${state.busy ? "disabled" : ""}>I received it</button>
+              <button class="btn gold" data-action="confirm" data-id="${i.id}" ${dis}>I received it</button>
               <button class="btn ghost" data-open="${i.id}">View passport</button>
               ${canRefund
-                ? `<button class="btn danger" data-action="claim-refund" data-id="${i.id}" ${state.busy ? "disabled" : ""}>It never came: get my money back</button>`
-                : `<p style="width:100%;margin:6px 0 0;font-size:13px">If it never arrives, you can take your money back from ${fmtDate(refundAt)}.</p>`}
+                ? `<button class="btn danger" data-action="claim-refund" data-id="${i.id}" ${dis}>It never came: get my money back</button>`
+                : `<p class="fine">If it never arrives, you can take your money back from ${fmtDate(refundAt)}.</p>`}
             </div>
           </div>
         </div>`;
-    }).join("");
+    }
+    return `
+      <div class="order">
+        ${art(i)}
+        <div>
+          <h3>${esc(i.name)}</h3>
+          <p>${esc(i.brand)} · bought by ${esc(nameOf(i.buyer))} · paid ${fmtDate(i.paidAt)}</p>
+          <span class="chip held">${usd(i.price)} held · paid to you when they confirm delivery</span>
+          <div class="actions">
+            <button class="btn ghost" data-open="${i.id}">View passport</button>
+            <button class="btn danger" data-action="seller-cancel" data-id="${i.id}" ${dis}>Can't ship? Refund the buyer</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderOrders() {
+    const buying = state.items.filter((i) => i.status === STATUS.PENDING && same(i.buyer, myAddr()));
+    const selling = state.items.filter((i) => i.status === STATUS.PENDING && same(i.owner, myAddr()));
+    const done = [];
+    for (const it of state.items) {
+      for (const t of state.histories[it.id] || []) {
+        if (isZero(t.from)) continue;
+        if (same(t.to, myAddr())) done.push({ it, t, kind: "Bought", other: t.from });
+        else if (same(t.from, myAddr())) done.push({ it, t, kind: "Sold", other: t.to });
+      }
+    }
+    done.sort((a, b) => Number(b.t.at) - Number(a.t.at));
+
+    let html = `
+      <div class="section-head">
+        <div><h2>Orders</h2><p>What you're buying, what you've sold, and what's done</p></div>
+      </div>`;
+    if (!buying.length && !selling.length && !done.length) {
+      return html + `
+        <div class="empty">
+          <h3>No orders yet</h3>
+          <p>When you buy or sell a piece, it shows here until delivery is confirmed.</p>
+          <button class="btn ghost" data-tab-go="shop">Browse pre-owned</button>
+        </div>`;
+    }
+    if (buying.length) html += `<div class="h-label">On the way to you</div>` + buying.map((i) => orderRow(i, "buyer")).join("");
+    if (selling.length) html += `<div class="h-label">Sold: ship it</div>` + selling.map((i) => orderRow(i, "seller")).join("");
+    if (done.length) {
+      html += `<div class="h-label">Completed</div><div class="done-list">` + done.map(({ it, t, kind, other }) => `
+        <button class="done" data-open="${it.id}">
+          ${art(it, "mini")}
+          <span><strong>${kind} ${esc(it.name)}</strong><small>${kind === "Bought" ? "from" : "to"} ${esc(nameOf(other))} · ${fmtDate(t.at)}</small></span>
+          <span class="done-amt ${kind === "Sold" ? "plus" : ""}">${kind === "Sold" ? "+" : "−"}${usd(t.price)}</span>
+        </button>`).join("") + `</div>`;
+    }
+    return html;
   }
 
   function renderFoot() {
@@ -369,15 +498,19 @@
       <span>·</span>
       <a href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">Contract ${short(CFG.contractAddress)} (verified) ↗</a>
       <span>·</span>
+      <button class="linkish foot-link" data-action="how">How it works</button>
+      <span>·</span>
       <span>Demo: test dollars only</span>`;
   }
 
   function render() {
+    document.body.classList.toggle("public", !!state.publicId);
     renderWho();
     renderTabs();
     renderFoot();
     const view = $("#view");
     if (state.fatal) {
+      $("#hero").innerHTML = "";
       view.innerHTML = `<div class="empty"><h3>Can't connect</h3><p>${esc(state.fatal)}</p><button class="btn primary" onclick="location.reload()">Try again</button></div>`;
       return;
     }
@@ -385,49 +518,138 @@
       view.innerHTML = `<div class="loading"><div class="spinner"></div>Connecting to Arc…</div>`;
       return;
     }
+    if (state.publicId) {
+      $("#hero").innerHTML = "";
+      view.innerHTML = renderPublic(state.publicId);
+      return;
+    }
+    renderHero();
     view.innerHTML = state.tab === "shop" ? renderShop() : state.tab === "orders" ? renderOrders() : renderWardrobe();
     if (state.openItemId) refreshDetailActions();
   }
 
+  // ------------------------------------------------- public passport page
+  function qrSvg(text) {
+    try {
+      const qr = window.qrcode(0, "M");
+      qr.addData(text);
+      qr.make();
+      return qr.createSvgTag({ cellSize: 4, margin: 0 });
+    } catch (_) { return ""; }
+  }
+
+  function statusText(item) {
+    if (item.status === STATUS.LISTED) return `For sale · ${usd(item.price)}`;
+    if (item.status === STATUS.PENDING) return "Sale in progress · payment held";
+    return "In owner's wardrobe";
+  }
+
+  function timelineHtml(item) {
+    const h = state.histories[item.id] || [];
+    if (!h.length) return `<li><div class="t-sub">No history yet.</div></li>`;
+    return h.map((t) => isZero(t.from)
+      ? `<li><div class="t-main">Passport issued to ${esc(nameOf(t.to))}</div><div class="t-sub">${fmtDate(t.at)}</div></li>`
+      : `<li><div class="t-main">${esc(nameOf(t.from))} → ${esc(nameOf(t.to))} for ${usd(t.price)}</div><div class="t-sub">${fmtDate(t.at)} · delivery confirmed, payment released</div></li>`).join("");
+  }
+
+  function renderPublic(id) {
+    const item = itemById(id);
+    if (!item) {
+      return `<div class="empty"><h3>Passport #${esc(id)} not found</h3><p>Check the link, or open the app.</p><button class="btn primary" data-action="leave-public">Open the app</button></div>`;
+    }
+    const f = facts(item);
+    const url = passportUrl(id);
+    return `
+      <div class="pp">
+        <button class="linkish back" data-action="leave-public">← Back to the app</button>
+        <article class="cert">
+          <div class="cert-top">
+            <span class="cert-kicker">Digital product passport</span>
+            <span class="cert-no">No. ${pad(id)}</span>
+          </div>
+          <div class="cert-main">
+            <div class="cert-photo">${art(item)}</div>
+            <div class="cert-info">
+              <h2>${esc(item.name)}</h2>
+              <p class="cert-brand">${esc(item.brand || "No brand")}</p>
+              ${item.details ? `<p class="cert-details">${esc(item.details)}</p>` : ""}
+              <dl class="cert-grid">
+                <div><dt>Issued</dt><dd>${f.created ? fmtDate(f.created) : "—"}</dd></div>
+                <div><dt>Owners so far</dt><dd>${f.owners}</dd></div>
+                <div><dt>Current owner</dt><dd>${esc(nameOf(item.owner))}</dd></div>
+                <div><dt>Status</dt><dd>${esc(statusText(item))}</dd></div>
+                <div><dt>Last sale</dt><dd>${f.lastSale ? `${usd(f.lastSale.price)} · ${fmtDate(f.lastSale.at)}` : "Never sold"}</dd></div>
+                <div><dt>Recorded on</dt><dd>${esc(CFG.chainName)}</dd></div>
+              </dl>
+            </div>
+          </div>
+          <div class="cert-bottom">
+            <div class="cert-qr">${qrSvg(url)}<small>Scan to verify</small></div>
+            <div class="cert-seal">
+              <strong>✓ Verified record on Arc</strong>
+              <p>This passport lives in a verified smart contract. Its details can't be edited, and every change of owner is recorded only when a buyer confirms delivery.</p>
+              <div class="row">
+                <button class="btn ghost small" data-action="copy-link" data-id="${id}">Copy link</button>
+                <a class="btn ghost small" href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">See the contract on Arc ↗</a>
+              </div>
+            </div>
+          </div>
+        </article>
+        <div class="h-label">Ownership history</div>
+        <ul class="timeline">${timelineHtml(item)}</ul>
+        ${item.status === STATUS.LISTED ? `
+          <div class="callout info pp-cta">
+            <span>This piece is for sale for <strong>${usd(item.price)}</strong>. The money is held until it arrives.</span>
+            <button class="btn gold" data-action="public-buy" data-id="${id}">Buy it in the app</button>
+          </div>` : ""}
+      </div>`;
+  }
+
+  function route() {
+    document.querySelectorAll("#toast-root .toast:not(.pending)").forEach((t) => t.remove());
+    const m = /^#passport=(\d+)$/.exec(location.hash);
+    state.publicId = m ? Number(m[1]) : null;
+    closeModal();
+    render();
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener("hashchange", route);
+  function leavePublic() {
+    history.pushState("", document.title, location.pathname + location.search);
+    route();
+  }
+
   // ------------------------------------------------------------ item detail
-  async function openDetail(id) {
-    const item = state.items.find((i) => i.id === id);
+  function openDetail(id) {
+    const item = itemById(id);
     if (!item) return;
+    const f = facts(item);
     openModal("Item passport", `
       ${art(item)}
       <h4 class="detail-title">${esc(item.name)}</h4>
       <p class="detail-brand">${esc(item.brand || "No brand")}${item.details ? ` · ${esc(item.details)}` : ""}</p>
-      <a class="verified" href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">✓ Passport #${item.id}, recorded on Arc ↗</a>
+      <div class="detail-links">
+        <a class="verified" href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">✓ Passport #${item.id}, recorded on Arc ↗</a>
+        <button class="btn ghost small" data-action="share" data-id="${item.id}">Share passport</button>
+      </div>
       <div class="facts">
         <div class="fact"><small>Current owner</small><strong>${esc(nameOf(item.owner))}</strong></div>
         <div class="fact"><small>Status</small><strong data-status></strong></div>
+        <div class="fact"><small>Owners so far</small><strong>${f.owners}</strong></div>
+        <div class="fact"><small>Last sale</small><strong>${f.lastSale ? usd(f.lastSale.price) : "Never sold"}</strong></div>
       </div>
       <div data-actions></div>
       <div class="h-label">Ownership history</div>
-      <ul class="timeline" data-history><li><div class="t-sub">Loading history…</div></li></ul>
+      <ul class="timeline">${timelineHtml(item)}</ul>
     `);
     state.openItemId = id;
     refreshDetailActions();
-    try {
-      const hist = await state.contract.getHistory(id);
-      const ul = $("[data-history]");
-      if (!ul || state.openItemId !== id) return;
-      ul.innerHTML = hist.map((h) => {
-        const [from, to, price, at] = [h[0], h[1], h[2], h[3]];
-        return isZero(from)
-          ? `<li><div class="t-main">Passport created by ${esc(nameOf(to))}</div><div class="t-sub">${fmtDate(at)}</div></li>`
-          : `<li><div class="t-main">${esc(nameOf(from))} → ${esc(nameOf(to))} for ${usd(price)}</div><div class="t-sub">${fmtDate(at)} · delivery confirmed, payment released</div></li>`;
-      }).join("");
-    } catch (e) {
-      const ul = $("[data-history]");
-      if (ul) ul.innerHTML = `<li><div class="t-sub">Couldn't load the history. Please try again.</div></li>`;
-    }
   }
 
   function refreshDetailActions() {
     const box = $("[data-actions]");
     const statusEl = $("[data-status]");
-    const item = state.items.find((i) => i.id === state.openItemId);
+    const item = itemById(state.openItemId);
     if (!box || !item) return;
     const isOwner = same(item.owner, myAddr());
     const isBuyer = same(item.buyer, myAddr());
@@ -465,7 +687,7 @@
           <button class="btn gold block" data-action="confirm" data-id="${item.id}" ${dis}>I received it: release ${usd(item.price)} to ${esc(nameOf(item.owner))}</button>
           ${canRefund
             ? `<button class="btn danger block" data-action="claim-refund" data-id="${item.id}" ${dis}>It never came: get my money back</button>`
-            : `<span class="hint" style="font-size:13px;color:var(--muted)">If it never arrives, you can take your money back from ${fmtDate(refundAt)}.</span>`}
+            : `<span class="fine">If it never arrives, you can take your money back from ${fmtDate(refundAt)}.</span>`}
         </div>`;
     } else if (item.status === STATUS.LISTED) {
       html = `<button class="btn gold block" data-action="buy" data-id="${item.id}" ${dis}>Buy for ${usd(item.price)}</button>`;
@@ -475,20 +697,69 @@
     if (box.dataset.sig !== html) { box.innerHTML = html; box.dataset.sig = html; }
   }
 
+  // ------------------------------------------------------------ photos
+  // Crops to 4:3, shrinks and compresses until it fits in the passport.
+  async function compressPhoto(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((res, rej) => {
+        const i = new Image();
+        i.onload = () => res(i);
+        i.onerror = () => rej(new Error("unreadable"));
+        i.src = url;
+      });
+      const W = img.naturalWidth, H = img.naturalHeight;
+      let sw = W, sh = Math.round(W * 3 / 4);
+      if (sh > H) { sh = H; sw = Math.round(H * 4 / 3); }
+      const sx = Math.round((W - sw) / 2), sy = Math.round((H - sh) / 2);
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      for (const [w, q] of [[240, 0.7], [208, 0.66], [184, 0.6], [160, 0.56], [140, 0.5], [120, 0.45]]) {
+        canvas.width = w;
+        canvas.height = Math.round(w * 3 / 4);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+        let data = canvas.toDataURL("image/webp", q);
+        if (!data.startsWith("data:image/webp")) data = canvas.toDataURL("image/jpeg", q);
+        if (data.length <= MAX_PHOTO_CHARS) return data;
+      }
+      throw new Error("too detailed");
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  // Rough fee for storing the photo on Arc (storage ~22k gas per 32 bytes, 20 gwei base fee)
+  const photoFee = (chars) => (Math.ceil(chars / 32) * 22100 + chars * 16) * 21e-9;
+
   // -------------------------------------------------------------- add item
   function openAddItem() {
     const picks = Object.entries(ICONS).map(([k, v], idx) => `
       <div><input type="radio" name="kind" id="kind-${k}" value="${k}" ${idx === 0 ? "checked" : ""}>
       <label for="kind-${k}"><svg viewBox="0 0 64 64">${v.svg}</svg>${v.label}</label></div>`).join("");
+    const samples = SAMPLES.map((s, i) => `<button type="button" class="sample" data-sample="${i}">${esc(s.name)}</button>`).join("");
+    let photoData = "";
     openModal("Add a piece", `
       <form id="add-form" novalidate>
+        <div class="samples"><span>Quick fill:</span>${samples}</div>
         <div class="field"><label for="f-name">What is it?</label><input id="f-name" type="text" maxlength="60" placeholder="e.g. Navy wool blazer" required></div>
         <div class="row">
           <div class="field"><label for="f-brand">Brand</label><input id="f-brand" type="text" maxlength="40" placeholder="e.g. Hugo Boss"></div>
           <div class="field"><label for="f-details">Details</label><input id="f-details" type="text" maxlength="80" placeholder="Size, condition, serial no."></div>
         </div>
-        <div class="field"><label>Type</label><div class="icon-pick">${picks}</div></div>
-        <div class="field"><label for="f-photo">Photo link (optional)</label><input id="f-photo" type="url" placeholder="https://…"><span class="hint">Leave empty to use the icon.</span></div>
+        <div class="field">
+          <label>Photo</label>
+          <div class="photo-pick">
+            <div class="photo-prev" id="f-prev"><span>No photo</span></div>
+            <div>
+              <label class="btn ghost small" for="f-photo">Take or choose a photo</label>
+              <input id="f-photo" type="file" accept="image/*" capture="environment" hidden>
+              <button type="button" class="linkish" id="f-photo-clear" hidden>Remove photo</button>
+              <p class="hint" id="f-photo-hint">The photo is shrunk and saved inside the passport on Arc, so every future buyer sees the real piece.</p>
+            </div>
+          </div>
+        </div>
+        <div class="field" id="f-kind-wrap"><label>Or pick an icon</label><div class="icon-pick">${picks}</div></div>
         <label class="check"><input id="f-sell" type="checkbox"> List it for sale now</label>
         <div class="field" id="f-price-wrap" hidden>
           <label for="f-price">Price</label>
@@ -498,32 +769,61 @@
         <button class="btn primary block" type="submit" ${state.busy ? "disabled" : ""}>Add to wardrobe</button>
       </form>`, (m) => {
       const sell = $("#f-sell", m);
+      const err = $("#f-error", m);
       sell.addEventListener("change", () => ($("#f-price-wrap", m).hidden = !sell.checked));
       $("#f-name", m).focus();
+
+      m.querySelectorAll("[data-sample]").forEach((b) => b.addEventListener("click", () => {
+        const s = SAMPLES[Number(b.dataset.sample)];
+        $("#f-name", m).value = s.name;
+        $("#f-brand", m).value = s.brand;
+        $("#f-details", m).value = s.details;
+        const r = $(`#kind-${s.kind}`, m); if (r) r.checked = true;
+        sell.checked = true;
+        $("#f-price-wrap", m).hidden = false;
+        $("#f-price", m).value = s.price;
+      }));
+
+      const setPhoto = (data) => {
+        photoData = data;
+        $("#f-prev", m).innerHTML = data ? `<img src="${data}" alt="Photo preview">` : "<span>No photo</span>";
+        $("#f-photo-clear", m).hidden = !data;
+        $("#f-kind-wrap", m).hidden = !!data;
+        $("#f-photo-hint", m).textContent = data
+          ? `Saved inside the passport on Arc (${(data.length / 1024).toFixed(1)} KB, adds about $${photoFee(data.length).toFixed(2)} to the fee).`
+          : "The photo is shrunk and saved inside the passport on Arc, so every future buyer sees the real piece.";
+      };
+      $("#f-photo", m).addEventListener("change", async (ev) => {
+        const file = ev.target.files && ev.target.files[0];
+        if (!file) return;
+        err.textContent = "";
+        try { setPhoto(await compressPhoto(file)); }
+        catch (_) { setPhoto(""); err.textContent = "Couldn't use that photo. Try a JPG or PNG."; }
+        ev.target.value = "";
+      });
+      $("#f-photo-clear", m).addEventListener("click", () => setPhoto(""));
+
       $("#add-form", m).addEventListener("submit", async (ev) => {
         ev.preventDefault();
         const name = $("#f-name", m).value.trim();
         const brand = $("#f-brand", m).value.trim();
         const details = $("#f-details", m).value.trim();
-        const photo = $("#f-photo", m).value.trim();
         const kind = m.querySelector('input[name="kind"]:checked')?.value || "other";
         const price = parseFloat($("#f-price", m).value);
-        const err = $("#f-error", m);
         if (!name) { err.textContent = "Please give the piece a name."; return; }
-        if (photo && !isSafeImageUrl(photo)) { err.textContent = "Photo links must start with https://"; return; }
         if (sell.checked && !(price > 0)) { err.textContent = "Please enter a price above $0."; return; }
-        if (!(await hasGasMoney())) { err.textContent = "You need a few cents of test dollars first. Tap “Add money”."; return; }
+        if (!(await hasGasMoney(photoData ? 0.25 : 0.01))) { err.textContent = "You need a few cents of test dollars first. Tap “Add money”."; return; }
         closeModal();
         const rc = await runTx({
           pending: `Creating the passport for “${name}”…`,
           done: `“${name}” is in your wardrobe, with its passport.`,
-          send: (c) => c.createPassport(name, brand, details, photo || `icon:${kind}`),
+          send: (c) => c.createPassport(name, brand, details, photoData || `icon:${kind}`),
         });
         if (rc && sell.checked) {
-          const ev2 = rc.logs.map((l) => { try { return state.contract.interface.parseLog(l); } catch (_) { return null; } })
+          const created = rc.logs.map((l) => { try { return state.contract.interface.parseLog(l); } catch (_) { return null; } })
             .find((x) => x && x.name === "PassportCreated");
-          if (ev2) {
-            const id = Number(ev2.args.id);
+          if (created) {
+            const id = Number(created.args.id);
             await runTx({
               pending: `Listing “${name}” for ${usd(toWei(price.toFixed(2)))}…`,
               done: `“${name}” is now for sale.`,
@@ -535,21 +835,22 @@
     });
   }
 
-  async function hasGasMoney() {
+  async function hasGasMoney(dollars) {
     const bal = await state.provider.getBalance(myAddr()).catch(() => 0n);
-    return bal >= toWei("0.01");
+    return bal >= toWei(String(dollars));
   }
 
   // ------------------------------------------------------------------- buy
   function openBuy(id) {
-    const item = state.items.find((i) => i.id === id);
+    const item = itemById(id);
     if (!item) return;
+    const f = facts(item);
     const bal = state.balances[state.current] ?? 0n;
     const enough = bal >= item.price + toWei("0.01");
     openModal("Buy this piece", `
       ${art(item)}
       <h4 class="detail-title">${esc(item.name)}</h4>
-      <p class="detail-brand">${esc(item.brand)} · sold by ${esc(nameOf(item.owner))}</p>
+      <p class="detail-brand">${esc(item.brand)} · sold by ${esc(nameOf(item.owner))} · ${f.owners} owner${f.owners === 1 ? "" : "s"} so far</p>
       <div class="callout held">
         <strong>${usd(item.price)} is held safely, not sent straight to the seller.</strong><br>
         ${esc(nameOf(item.owner))} gets paid only when you confirm the piece arrived. If it never comes, you can take your money back after ${REFUND_DAYS} days.
@@ -564,6 +865,23 @@
     `);
   }
 
+  // ------------------------------------------------------------ how it works
+  function openHow() {
+    openModal("How it works on Arc", `
+      <ol class="how-list">
+        <li><strong>Every piece gets a passport.</strong> Its name, brand, details, photo, owner and full ownership history are stored in a verified smart contract on Arc. The details can't be edited after the passport is issued.</li>
+        <li><strong>Payment is held, not sent.</strong> When a buyer pays, the dollars go into the contract, not to the seller. Nobody can move them except by the rules below.</li>
+        <li><strong>Released on delivery.</strong> When the buyer taps “I received it”, the contract pays the seller and moves the passport to the buyer in the same step, adding the sale to its history.</li>
+        <li><strong>If something goes wrong.</strong> The seller can cancel and refund the buyer. If nothing arrives within ${REFUND_DAYS} days, the buyer can take the money back without the seller.</li>
+        <li><strong>Why Arc.</strong> On Arc, USDC (digital dollars) is the native currency, so there's no separate crypto token to buy for fees. Most actions cost under a cent (saving a photo in the passport costs a few cents), and each one is final in under a second.</li>
+      </ol>
+      <div class="row" style="margin-top:6px">
+        <a class="btn ghost" href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">See the contract on Arc ↗</a>
+        <button class="btn primary" data-close>Got it</button>
+      </div>
+    `);
+  }
+
   // ------------------------------------------------------------- add money
   function openAddMoney() {
     const w = me();
@@ -572,7 +890,7 @@
       <p style="margin-top:0">This demo runs on Arc's test network, so the dollars are free test USDC. In a real launch, people would add money with a card or bank transfer.</p>
       <div class="facts">
         <div class="fact"><small>${esc(person(state.current).name)}'s balance</small><strong>${usd(state.balances[state.current])}</strong></div>
-        <div class="fact"><small>Network fee per action</small><strong>under $0.01</strong></div>
+        <div class="fact"><small>Network fee per action</small><strong>under $0.01 (photo: a few cents)</strong></div>
       </div>
       ${hasMM ? `
         <div class="h-label">Fastest: send from your MetaMask</div>
@@ -620,6 +938,11 @@
     }
   }
 
+  async function copy(text, okMsg) {
+    try { await navigator.clipboard.writeText(text); toast(okMsg); }
+    catch (_) { toast("Couldn't copy. Select it and copy it by hand.", "error"); }
+  }
+
   // ---------------------------------------------------------------- events
   document.addEventListener("click", async (ev) => {
     const el = ev.target.closest("[data-persona],[data-tab],[data-tab-go],[data-open],[data-action]");
@@ -642,13 +965,19 @@
     if (el.dataset.open) { openDetail(Number(el.dataset.open)); return; }
 
     const id = Number(el.dataset.id);
-    const item = state.items.find((i) => i.id === id);
+    const item = itemById(id);
     switch (el.dataset.action) {
       case "add-item": openAddItem(); break;
+      case "how": openHow(); break;
       case "add-money": openAddMoney(); break;
-      case "copy-addr":
-        try { await navigator.clipboard.writeText(myAddr()); toast("Account number copied."); }
-        catch (_) { toast("Couldn't copy. Select the number and copy it by hand.", "error"); }
+      case "copy-addr": copy(myAddr(), "Account number copied."); break;
+      case "copy-link": copy(passportUrl(id), "Passport link copied."); break;
+      case "share": closeModal(); location.hash = `passport=${id}`; break;
+      case "leave-public": leavePublic(); break;
+      case "public-buy":
+        leavePublic();
+        state.tab = "shop"; lsSet(LS.tab, "shop"); render();
+        if (item && !same(item.owner, myAddr())) openBuy(id);
         break;
       case "topup": topUp(el.dataset.amount); break;
       case "buy": openBuy(id); break;
@@ -682,9 +1011,11 @@
         })) { state.tab = "wardrobe"; lsSet(LS.tab, "wardrobe"); render(); }
         break;
       case "seller-cancel":
+        closeModal();
         await runTx({ pending: "Refunding the buyer…", done: "The buyer got their money back. The piece is listed again.", send: (c) => c.sellerCancelSale(id) });
         break;
       case "claim-refund":
+        closeModal();
         await runTx({ pending: "Taking your money back…", done: "Your money is back in your balance.", send: (c) => c.buyerClaimRefund(id) });
         break;
     }
@@ -692,6 +1023,8 @@
 
   // ------------------------------------------------------------------ start
   async function start() {
+    const m = /^#passport=(\d+)$/.exec(location.hash);
+    state.publicId = m ? Number(m[1]) : null;
     render();
     try {
       await connect();

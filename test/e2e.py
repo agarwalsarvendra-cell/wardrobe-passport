@@ -1,10 +1,11 @@
 """End-to-end test of the app against the local test chain.
 
-Runs the full demo story in a real browser: Maya adds and lists a blazer,
-Alex buys it (money held), Maya sees it's paid, Alex confirms delivery,
-money and passport move. Saves screenshots to test/shots/.
+Runs the full demo story in a real browser: Maya adds a blazer with a photo
+and lists it, Alex buys it (money held), Maya sees it's paid, Alex confirms
+delivery, money and passport move; then the public passport page, order
+history and resale. Saves screenshots to test/shots/.
 """
-import json, os, sys, time, urllib.request
+import json, os, re, sys, time, urllib.request
 from playwright.sync_api import sync_playwright, expect
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -44,21 +45,32 @@ with sync_playwright() as p:
     page.evaluate("window.WP.refresh()")
     expect(page.locator(".persona.active .p-bal")).to_have_text("$20.00")
     page.screenshot(path=f"{SHOTS}/01-empty-wardrobe.png")
-    print("✓ app loads, personas funded")
+    page.get_by_role("button", name="How it works on Arc").click()
+    expect(page.locator(".modal")).to_contain_text("Payment is held, not sent")
+    page.wait_for_timeout(300)
+    page.screenshot(path=f"{SHOTS}/01b-how-it-works.png")
+    page.get_by_role("button", name="Got it").click()
+    expect(page.locator(".modal")).to_have_count(0)
+    print("✓ app loads, personas funded, 'How it works' explainer opens")
 
     # Maya adds a blazer and lists it for $40
     page.get_by_role("button", name="+ Add a piece").click()
     page.fill("#f-name", "Navy wool blazer")
     page.fill("#f-brand", "Hugo Boss")
     page.fill("#f-details", "Size 40R, worn twice")
+    page.set_input_files("#f-photo", os.path.join(HERE, "sample-photo.jpg"))
+    expect(page.locator("#f-prev img")).to_be_visible()
+    expect(page.locator("#f-photo-hint")).to_contain_text("Saved inside the passport on Arc")
     page.check("#f-sell")
     page.fill("#f-price", "40")
     page.screenshot(path=f"{SHOTS}/02-add-form.png")
     page.get_by_role("button", name="Add to wardrobe").click()
     expect(page.locator(".toast.ok", has_text="is now for sale")).to_be_visible(timeout=20000)
     expect(page.locator(".card", has_text="Navy wool blazer")).to_contain_text("For sale · $40.00")
+    expect(page.locator(".card", has_text="Navy wool blazer").locator("img")).to_have_attribute("src", re.compile(r"^data:image/(webp|jpeg);base64,"))
+    expect(page.locator(".toast.ok", has_text="Network fee")).to_have_count(2)
     page.screenshot(path=f"{SHOTS}/03-maya-listed.png")
-    print("✓ Maya created the passport and listed it for $40")
+    print("✓ Maya created the passport with a photo stored on-chain and listed it for $40 (fees shown)")
 
     # Alex finds it in the shop and pays
     page.locator('[data-persona="alex"]').click()
@@ -66,7 +78,7 @@ with sync_playwright() as p:
     expect(page.locator(".card", has_text="Navy wool blazer")).to_contain_text("$40.00")
     page.screenshot(path=f"{SHOTS}/04-alex-shop.png")
     page.locator(".card", has_text="Navy wool blazer").click()
-    expect(page.locator(".modal")).to_contain_text("Passport created by Maya")
+    expect(page.locator(".modal")).to_contain_text("Passport issued to Maya")
     page.wait_for_timeout(400)
     page.screenshot(path=f"{SHOTS}/05-passport-before.png")
     page.get_by_role("button", name="Buy for $40.00").click()
@@ -90,11 +102,14 @@ with sync_playwright() as p:
     page.wait_for_timeout(400)
     page.screenshot(path=f"{SHOTS}/08-maya-sold.png")
     page.keyboard.press("Escape")
+    page.get_by_role("tab", name="Orders").click()
+    expect(page.locator(".order", has_text="Navy wool blazer")).to_contain_text("paid to you when they confirm delivery")
+    expect(page.locator(".stat", has_text="held right now")).to_contain_text("$40.00")
     print("✓ Maya sees the sale and that the money is held")
 
     # Alex confirms delivery
     page.locator('[data-persona="alex"]').click()
-    page.get_by_role("tab", name="My orders").click()
+    page.get_by_role("tab", name="Orders").click()
     page.get_by_role("button", name="I received it").click()
     expect(page.locator(".toast.ok", has_text="Done!")).to_be_visible(timeout=20000)
     expect(page.get_by_role("heading", name="Alex's wardrobe")).to_be_visible()
@@ -106,7 +121,34 @@ with sync_playwright() as p:
     page.wait_for_timeout(400)
     page.screenshot(path=f"{SHOTS}/09-passport-after.png", full_page=True)
     page.keyboard.press("Escape")
-    print("✓ Alex confirmed: Maya received exactly $40, passport + history moved to Alex")
+    expect(page.locator(".stat", has_text="sales completed")).to_contain_text("1")
+    expect(page.locator(".stat", has_text="paid out safely")).to_contain_text("$40.00")
+    print("✓ Alex confirmed: Maya received exactly $40, passport + history moved to Alex, live stats updated")
+
+    # Public passport page (what a QR code / shared link opens)
+    page.locator(".card", has_text="Navy wool blazer").click()
+    page.get_by_role("button", name="Share passport").click()
+    expect(page.locator(".cert")).to_contain_text("Digital product passport")
+    expect(page.locator(".cert")).to_contain_text("No. 000001")
+    expect(page.locator(".cert")).to_contain_text("$40.00")
+    expect(page.locator(".pp .timeline")).to_contain_text("Maya → Alex for $40.00")
+    expect(page.locator(".cert-qr svg")).to_be_visible()
+    assert page.url.endswith("#passport=1"), page.url
+    page.wait_for_timeout(300)
+    page.screenshot(path=f"{SHOTS}/11-public-passport.png", full_page=True)
+    page.get_by_role("button", name="← Back to the app").click()
+    expect(page.get_by_role("heading", name="Alex's wardrobe")).to_be_visible()
+    print("✓ Public passport page: certificate, QR code, history, shareable link")
+
+    # Order history
+    page.get_by_role("tab", name="Orders").click()
+    expect(page.locator(".done", has_text="Bought Navy wool blazer")).to_contain_text("−$40.00")
+    page.locator('[data-persona="maya"]').click()
+    expect(page.locator(".done", has_text="Sold Navy wool blazer")).to_contain_text("+$40.00")
+    page.screenshot(path=f"{SHOTS}/12-maya-orders.png")
+    page.locator('[data-persona="alex"]').click()
+    page.get_by_role("tab", name="My wardrobe").click()
+    print("✓ Orders tab shows completed purchase (Alex) and sale (Maya)")
 
     # Resale: Alex lists it again from the passport screen
     page.locator(".card", has_text="Navy wool blazer").click()
@@ -119,9 +161,30 @@ with sync_playwright() as p:
     expect(page.locator(".card", has_text="Navy wool blazer")).to_contain_text("$55.00")
     print("✓ Resale: Alex relisted it for $55 and Maya can see it in the shop")
 
+    # Quick-fill sample piece (icon instead of photo), listed straight away by Alex
+    page.locator('[data-persona="alex"]').click()
+    page.get_by_role("tab", name="My wardrobe").click()
+    page.get_by_role("button", name="+ Add a piece").click()
+    page.get_by_role("button", name="Steel dive watch").click()
+    expect(page.locator("#f-price")).to_have_value("12")
+    page.get_by_role("button", name="Add to wardrobe").click()
+    expect(page.locator(".toast.ok", has_text="is now for sale")).to_be_visible(timeout=20000)
+    expect(page.locator(".card", has_text="Steel dive watch")).to_contain_text("For sale · $12.00")
+    page.locator('[data-persona="maya"]').click()
+    page.goto(URL + "#passport=2")
+    expect(page.locator(".pp-cta")).to_contain_text("$12.00")
+    page.get_by_role("button", name="Buy it in the app").click()
+    expect(page.get_by_role("button", name="Pay $12.00")).to_be_visible()
+    page.keyboard.press("Escape")
+    print("✓ Quick-fill sample works; a listed item's public page links straight to buying")
+
     # Mobile layout check
     page.set_viewport_size({"width": 390, "height": 844})
-    page.screenshot(path=f"{SHOTS}/10-mobile-shop.png", full_page=True)
+    page.evaluate("document.querySelectorAll('#toast-root .toast').forEach(t => t.remove())")
+    page.screenshot(path=f"{SHOTS}/10-mobile-shop.png")
+    page.goto(URL + "#passport=1")
+    expect(page.locator(".cert")).to_be_visible()
+    page.screenshot(path=f"{SHOTS}/13-mobile-passport.png", full_page=True)
 
     browser.close()
 
