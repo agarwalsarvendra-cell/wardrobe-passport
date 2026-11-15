@@ -1,5 +1,4 @@
 import { ethers } from "ethers";
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { CFG } from "../config";
 import { q } from "../db";
 import { rpc } from "../chain";
@@ -12,7 +11,11 @@ function client() {
   const apiKey = process.env.CIRCLE_API_KEY;
   const entitySecret = process.env.CIRCLE_ENTITY_SECRET;
   if (!apiKey || !entitySecret) throw new Error("Circle is not configured: set CIRCLE_API_KEY and CIRCLE_ENTITY_SECRET.");
-  return initiateDeveloperControlledWalletsClient({ apiKey, entitySecret });
+  // Loaded on first use with require(), so Node picks the SDK's CommonJS build.
+  // (Its ES build is a .js file without "type": "module", which Node refuses to import.)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sdk = require("@circle-fin/developer-controlled-wallets") as typeof import("@circle-fin/developer-controlled-wallets");
+  return sdk.initiateDeveloperControlledWalletsClient({ apiKey, entitySecret });
 }
 
 async function walletSetId(): Promise<string> {
