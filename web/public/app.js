@@ -53,6 +53,7 @@
     loaded: false, online: true, busy: false, fatal: null,
     openItemId: null, publicId: null, inviteCode: null, invite: null,
     signin: { email: "", sent: false, demoCode: null },
+    q: "", cat: "all",
   };
 
   // ---------------------------------------------------------------- helpers
@@ -143,12 +144,12 @@
   }
 
   function photoSrc(u) {
-    const m = /^sha256:([0-9a-f]{64})$/.exec(u || "");
+    const m = /^sha256:([0-9a-f]{64})/.exec(u || "");
     if (m) return `/api/photo/${m[1]}`;
     if (/^data:image\/(webp|jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(u || "")) return u;
     return null;
   }
-  const photoHash = (u) => (/^sha256:([0-9a-f]{64})$/.exec(u || "") || [])[1] || null;
+  const photoHash = (u) => (/^sha256:([0-9a-f]{64})/.exec(u || "") || [])[1] || null;
 
   const ZERO_REC = { sold: 0, bought: 0, refundsGiven: 0, disputesWon: 0, disputesLost: 0, votesCast: 0, votesWithMajority: 0, inviteesDisputesLost: 0 };
   const recOf = (addr) => state.records[(addr || "").toLowerCase()] || ZERO_REC;
@@ -170,14 +171,15 @@
     other: { label: "Other", tint: "#efe9df", svg: '<path d="M28 14c0-5 8-5 8 0 0 3-4 4-4 8"/><path d="M32 22 6 44h52z"/>' },
   };
   function iconKey(imageUrl) {
-    const m = /^icon:(\w+)$/.exec(imageUrl || "");
+    const m = /(?:^icon:|;kind=)(\w+)$/.exec(imageUrl || "");
     return m && ICONS[m[1]] ? m[1] : "other";
   }
   function art(item, cls = "") {
     const src = photoSrc(item.imageUrl);
     if (src) return `<div class="art photo ${cls}"><img src="${esc(src)}" alt="${esc(item.name)}" loading="lazy"></div>`;
-    const ic = ICONS[iconKey(item.imageUrl)];
-    return `<div class="art ${cls}" style="--tint:${ic.tint}"><svg viewBox="0 0 64 64" aria-hidden="true">${ic.svg}</svg></div>`;
+    const k = iconKey(item.imageUrl);
+    const ic = ICONS[k];
+    return `<div class="art illus ${cls}" data-kind="${k}"><svg viewBox="0 0 64 64" aria-hidden="true">${ic.svg}</svg></div>`;
   }
 
   const SAMPLES = [
@@ -216,7 +218,7 @@
     if (state.isAdmin && !state.viewAs) return ["admin", "community"];
     const v = viewer();
     if (!v) return [];
-    const base = v.role === "partner" ? ["desk", "community"] : ["sell", "buy", "community"];
+    const base = v.role === "partner" ? ["desk", "community"] : ["buy", "sell", "community"];
     return state.isAdmin ? [...base, "admin"] : base;
   }
   function pickView(restore = false) {
@@ -402,23 +404,29 @@
     return f.created ? `Passport since ${fmtDate(f.created)}` : "";
   }
   const authBadge = (item) => (verified(item) ? `<span class="auth-badge" title="Authenticated by ${esc(nameOf(item.authBy))}">✓ Verified</span>` : "");
+  // Listing card: big photo, title and price, brand, who checked it.
   function card(item, footer) {
+    const shop = partnerOf(item.authBy);
+    const sold = item.status === STATUS.OWNED && (state.histories[item.id] || []).some((t) => !isZero(t.from));
+    const price = item.status === STATUS.LISTED ? usd(item.price) : sold ? `Sold ${usd(facts(item).lastSale.price)}` : "";
     return `
-      <button class="card" data-open="${item.id}" aria-label="Open ${esc(item.name)}">
-        <div class="card-art">${art(item)}<span class="pid">Passport #${item.id}</span>${authBadge(item)}</div>
-        <div class="card-body">
-          <p class="card-title">${esc(item.name)}</p>
-          <p class="card-brand">${esc(item.brand || "No brand")}</p>
-          <p class="card-prov">${esc(provenance(item))}</p>
-          <div class="card-foot">${footer ?? chipFor(item)}</div>
+      <button class="lcard" data-open="${item.id}" aria-label="Open ${esc(item.name)}">
+        <div class="lcard-img">${art(item)}
+          ${verified(item) ? `<span class="lbadge">✓ Verified</span>` : ""}
+          ${item.status === STATUS.DISPUTED ? `<span class="lbadge warn">In dispute</span>` : sold ? `<span class="lbadge muted">Sold</span>` : ""}
         </div>
+        <div class="lcard-row"><b>${esc(item.name)}</b>${price ? `<span>${price}</span>` : ""}</div>
+        <div class="lcard-sub">${esc(item.brand || "No brand")}${item.details ? `, ${esc(item.details)}` : ""}</div>
+        ${shop ? `<div class="lcard-sub">Checked by ${esc(shop.name)}</div>` : ""}
+        ${footer === "" ? "" : `<div class="lcard-foot">${footer ?? chipFor(item)}</div>`}
       </button>`;
   }
   const tiles = (list) => `<div class="tiles">${list.map(([v, l]) => `<div class="tile"><strong>${v}</strong><small>${esc(l)}</small></div>`).join("")}</div>`;
 
   function renderWho() {
     const el = $("#who");
-    if (!signedIn() || state.publicId || state.inviteCode) { el.innerHTML = ""; return; }
+    if (state.publicId || state.inviteCode) { el.innerHTML = ""; return; }
+    if (!signedIn()) { el.innerHTML = `<button class="btn primary signin-btn" data-action="open-signin">Sign in</button>`; return; }
     if (state.isAdmin) {
       el.innerHTML = `
         <div class="persona active" aria-label="Signed in">${avatar("A", "admin")}
@@ -472,143 +480,109 @@
 
   function moneyTip() {
     if (readOnly() || myBalance() > 0n) return "";
-    return `<p class="tip boxed">You have no test dollars yet. <button class="linkish" data-action="add-money">+ Add money</button> to cover purchases, deposits and small network fees.</p>`;
+    return `<p class="tip boxed">No test dollars yet. <button class="linkish" data-action="add-money">Add money</button></p>`;
   }
   const STEPS = ["Join by invitation", "ID checked at a pawn shop", "Pawn shop authenticates the piece", "Buyer pays, money is held", "Ship, then confirm or dispute", "A panel of members decides disputes"];
   const stepsHtml = () => `<ol class="steps">${STEPS.map((t, i) => `<li><span>${i + 1}</span>${t}</li>`).join("")}<li class="how-link"><button class="linkish" data-action="how">How it works on Arc</button></li></ol>`;
 
-  // The landing hero shows a real passport from the community: the thing only this product has.
-  function heroItem() {
-    const listed = state.items.filter((i) => i.status === STATUS.LISTED && verified(i) && !paused(i));
-    const sold = state.items.filter((i) => (state.histories[i.id] || []).some((t) => !isZero(t.from)) && !isZero(i.authBy));
-    return listed[listed.length - 1] || sold[sold.length - 1] || state.items.filter((i) => !isZero(i.authBy)).pop() || null;
+  // ------------------------------------------------------------ marketplace
+  const CATS = [["all", "All"], ["jacket", "Jackets"], ["top", "Tops"], ["dress", "Dresses"], ["trousers", "Trousers"], ["shoes", "Shoes"], ["bag", "Bags"], ["watch", "Watches"], ["other", "Accessories"]];
+  const GRID_ICON = '<rect x="10" y="10" width="18" height="18" rx="4"/><rect x="36" y="10" width="18" height="18" rx="4"/><rect x="10" y="36" width="18" height="18" rx="4"/><rect x="36" y="36" width="18" height="18" rx="4"/>';
+  const matches = (i) => {
+    if (state.cat !== "all" && iconKey(i.imageUrl) !== state.cat) return false;
+    const q = state.q.trim().toLowerCase();
+    return !q || `${i.name} ${i.brand} ${i.details}`.toLowerCase().includes(q);
+  };
+  function chipsHtml() {
+    return `<div class="cats" aria-label="Categories">${CATS.map(([k, label]) => `
+      <button class="cat ${state.cat === k ? "on" : ""}" data-cat="${k}" aria-pressed="${state.cat === k}">
+        <svg viewBox="0 0 64 64" aria-hidden="true">${k === "all" ? GRID_ICON : ICONS[k].svg}</svg><span>${label}</span></button>`).join("")}</div>`;
   }
-  function passportCard(item) {
-    if (!item) {
-      // Before the first piece exists, show what a passport looks like, clearly marked as an example.
-      return `
-        <div class="passport" aria-label="Example passport">
-          <div class="stamp">Verified<small>in person</small></div>
-          <div class="passport-head"><span>Example passport</span><b>No. 000001</b></div>
-          <div class="passport-body">${art({ name: "Dive watch", imageUrl: "icon:watch" })}
-            <div><h3>Steel dive watch</h3><p class="pp-brand">Seiko, box and papers</p>
-              <dl><dt>Owner</dt><dd>A member</dd><dt>Checked by</dt><dd>A partner pawn shop</dd><dt>Status</dt><dd>For sale, $120</dd></dl></div></div>
-          <ol class="passport-trail">
-            <li class="on"><i></i><span>Passport issued</span><small>on Arc</small></li>
-            <li class="on"><i></i><span>Authenticated in person</span><small>pawn shop</small></li>
-            <li><i></i><span>Buyer's money held until it arrives</span><small>contract</small></li>
-          </ol>
-        </div>`;
-    }
-    const f = facts(item);
-    const shop = partnerOf(item.authBy);
-    const trail = [[true, "Passport issued", fmtDate(f.created)]];
-    if (!isZero(item.authBy)) trail.push([true, `Authenticated by ${esc(nameOf(item.authBy))}`, fmtDate(item.authAt)]);
-    for (const t of f.sales.slice(-1)) trail.push([true, `Sold for ${usd(t.price)}, payment released`, fmtDate(t.at)]);
-    if (item.status === STATUS.LISTED) trail.push([false, `For sale at ${usd(item.price)}, money held on purchase`, "now"]);
-    return `
-      <div class="passport" aria-label="Passport ${item.id} from the community">
-        ${verified(item) ? `<div class="stamp">Verified<small>${esc(shop ? shop.city : "in person")}</small></div>` : ""}
-        <div class="passport-head"><span>A passport from the community</span><b>No. ${pad(item.id)}</b></div>
-        <div class="passport-body">${art(item)}
-          <div><h3>${esc(item.name)}</h3><p class="pp-brand">${esc(item.brand || "No brand")}${item.details ? `, ${esc(item.details)}` : ""}</p>
-            <dl><dt>Owner</dt><dd>${esc(nameOf(item.owner))}</dd><dt>Owners so far</dt><dd>${f.owners}</dd><dt>Status</dt><dd>${esc(statusText(item))}</dd></dl></div></div>
-        <ol class="passport-trail">${trail.map(([on, t, d]) => `<li class="${on ? "on" : ""}"><i></i><span>${t}</span><small>${esc(d)}</small></li>`).join("")}</ol>
-      </div>`;
+  function renderSearch() {
+    const el = $("#search");
+    const show = !state.publicId && !state.inviteCode && (!signedIn() || state.view === "buy");
+    if (!show) { el.innerHTML = ""; return; }
+    if (el.querySelector("input")) return; // keep focus while typing
+    el.innerHTML = `<label class="searchbar"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Search pieces or brands" value="${esc(state.q)}" aria-label="Search pieces or brands"></label>`;
   }
+  const listedNow = () => state.items.filter((i) => i.status === STATUS.LISTED && !paused(i));
+  const recentlySold = () => state.items.filter((i) => i.status === STATUS.OWNED && (state.histories[i.id] || []).some((t) => !isZero(t.from)));
 
+  // Landing: the 3D passport with the benefits of joining (drawn by passport3d.js).
+  // This block is static, so the live refresh never rebuilds the 3D scene.
   function renderHero() {
     const el = $("#hero");
-    if (!state.loaded || signedIn() || state.inviteCode) { el.innerHTML = ""; return; }
-    const s = stats();
-    const html = `
-      <div class="hero-copy">
-        <h2>Second-hand, from people you can vouch for.</h2>
-        <p>Wardrobe Passport is an invite-only community for buying and selling pre-owned clothes, bags and watches. Every member's ID is checked in person, every piece is authenticated before it's listed, and the money waits in a contract on Arc until the buyer has the item.</p>
-        <ul class="hero-facts" aria-label="Live from Arc">
-          <li><strong>${s.members}</strong><small>members</small></li>
-          <li><strong>${s.verified}</strong><small>ID-checked</small></li>
-          <li><strong>${s.sales}</strong><small>sales settled</small></li>
-          <li><strong>${s.disputes}</strong><small>disputes decided</small></li>
-        </ul>
-        <div class="row hero-cta"><a class="btn primary" href="#signin" data-scroll="signin">Try the demo</a><a class="btn ghost" href="#explain-h" data-scroll="explain-h">How it works</a></div>
-      </div>
-      ${passportCard(heroItem())}`;
-    if (el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; }
+    if (!state.loaded || signedIn() || state.inviteCode || state.publicId) { if (el.innerHTML) { el.innerHTML = ""; el.dataset.sig = ""; } return; }
+    if (el.dataset.sig === "why") return;
+    el.dataset.sig = "why";
+    el.innerHTML = `
+      <section class="why" aria-labelledby="why-h">
+        <div class="why-copy">
+          <h2 id="why-h">Pre-owned fashion from people you can vouch for</h2>
+          <p>Every member's ID and every piece is checked in person. Your money is held until the piece arrives.</p>
+          <div class="row why-cta"><a class="btn gold" href="#browse" data-scroll="browse">Browse pieces</a><button class="btn ghost" data-action="open-signin">Sign in</button></div>
+          <p class="why-hint">Drag the passport to spin it. Hover a badge to see what you get.</p>
+        </div>
+        <div class="stage3d" tabindex="0" aria-label="3D passport with the benefits of joining. Drag or use the arrow keys to spin it.">
+          <canvas aria-hidden="true"></canvas>
+          <div class="orbit"></div>
+        </div>
+      </section>`;
+    window.dispatchEvent(new Event("wp:stage"));
   }
 
-  // Plain-language explanation for first-time visitors.
+  function renderLanding() {
+    const s = stats();
+    const live = listedNow().filter(matches).reverse();
+    const sold = recentlySold().filter(matches).reverse();
+    const filtering = state.q.trim() || state.cat !== "all";
+    return `
+      <div class="intro" id="browse">
+        <div><h2>Browse pieces</h2></div>
+        <div class="intro-facts"><span><b>${s.members}</b> members</span><span><b>${s.sales}</b> sales</span><span><b>${s.disputes}</b> ${s.disputes === 1 ? "dispute" : "disputes"} decided</span></div>
+      </div>
+      ${chipsHtml()}
+      ${live.length ? `<div class="lgrid">${live.map((i) => card(i, "")).join("")}</div>`
+        : `<div class="empty slim"><p>${filtering ? "Nothing matches. Try another category or search." : "Nothing for sale yet."}</p></div>`}
+      ${sold.length ? `<h3 class="grid-h">Recently sold</h3><div class="lgrid">${sold.map((i) => card(i, "")).join("")}</div>` : ""}
+      ${explainHtml()}`;
+  }
+
   function explainHtml() {
-    const r = CFG.rules || {};
     return `
       <section class="explain" aria-labelledby="explain-h">
         <h2 id="explain-h">How it works</h2>
-        <p>Buying second-hand from a stranger comes down to three questions. Here is how the community answers each one, and what happens if something goes wrong.</p>
-        <dl class="qa">
-          <div><dt>Who is this person?</dt><dd>You can only join with an invite from a member, and your inviter's name stays linked to yours. Before you can sell, a partner pawn shop checks your photo ID in person.</dd></div>
-          <div><dt>Is the item real?</dt><dd>A pawn shop inspects every piece in person before it can be listed. Its check is stamped on the piece's digital passport, along with every owner and sale price.</dd></div>
-          <div><dt>Will I get it?</dt><dd>Your payment goes into a smart contract, not to the seller. The seller is paid only after you confirm it arrived. The seller also locks a 10% deposit.</dd></div>
-          <div><dt>What if something goes wrong?</dt><dd>Five ID-checked members, picked at random, decide. The pawn shop adds an inspection report. The contract counts the votes and pays out, and every step is public on Arc.</dd></div>
-        </dl>
-        <h2>A sale, step by step</h2>
-        <ol class="flow">
-          <li><b>Get invited</b>A member sends you a link. New members can buy pieces up to $50 right away.</li>
-          <li><b>Get your ID checked</b>Show your member code and a photo ID at a partner pawn shop to unlock selling.</li>
-          <li><b>Get the piece authenticated</b>The shop checks it in person and stamps its passport.</li>
-          <li><b>List it</b>Set a price and lock a 10% deposit. It appears in the members' marketplace.</li>
-          <li><b>Buyer pays, money is held</b>Ship within 5 days. The buyer has 7 days to confirm or open a dispute.</li>
-          <li><b>Everyone gets paid</b>The seller gets the price minus the shop's 3% fee, plus the deposit back. The passport moves to the buyer.</li>
-        </ol>
-        <h2>Who's who</h2>
-        <div class="roles-explain">
-          <div><h3>Members</h3><p>Buy and sell, invite up to ${r.startInvites ?? 3} people to start, and sit on dispute panels. Your record, including how the people you invited behave, is public.</p></div>
-          <div><h3>Partner pawn shops</h3><p>Check IDs at the front desk, authenticate pieces and file inspection reports. They earn 3% of each sale they stand behind.</p></div>
-          <div><h3>The contract</h3><p>Holds the money, enforces who can buy and sell, counts dispute votes and pays everyone. Nobody, including us, can change a record.</p></div>
+        <div class="promises">
+          <div><span class="pi"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg></span><h3>Members are vouched for</h3><p>Invite-only. IDs checked in person.</p></div>
+          <div><span class="pi"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span><h3>Every piece is checked</h3><p>A pawn shop authenticates it first.</p></div>
+          <div><span class="pi"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><h3>Your money is safe</h3><p>Held until you confirm delivery.</p></div>
+          <div><span class="pi"><svg viewBox="0 0 24 24"><path d="M12 4v16M5 8h14M7 8l-3 6h6zM17 8l-3 6h6z"/></svg></span><h3>Disputes are fair</h3><p>Five random members vote.</p></div>
         </div>
-        <p class="fine">Your first delivery is free (up to $${r.welcomeShippingCredit ?? 10}). The person who invited you earns $${r.inviterReward ?? 5} of credit after your first purchase. This runs on Arc's test network with test dollars.</p>
       </section>`;
   }
 
-  // ------------------------------------------------------------------ sign in
-  function renderSignin() {
+  // Sign in lives in a modal, so the landing page can be the marketplace.
+  function openSignin() {
     const si = state.signin;
     const codeForm = si.sent ? `
       <div class="field"><label for="si-code">Code sent to ${esc(si.email)}</label>
         <div class="row"><input id="si-code" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code" value="${esc(si.demoCode || "")}"><button class="btn primary" data-action="verify-code">Sign in</button></div>
-        ${si.demoCode ? `<span class="hint">Demo mode: email isn't connected yet, so your code is shown here.</span>` : `<span class="hint">Check your inbox. The code expires in 10 minutes.</span>`}
+        ${si.demoCode ? `<span class="hint">Demo mode: email isn't connected yet, so the code is shown here.</span>` : `<span class="hint">Check your inbox.</span>`}
         <button class="linkish" data-action="code-reset">Use a different email</button></div>`
       : `
       <div class="field"><label for="si-email">Email you joined with</label>
-        <div class="row"><input id="si-email" type="email" placeholder="you@example.com" value="${esc(si.email)}"><button class="btn primary" data-action="send-code">Send code</button></div>
-        <span class="hint">No password. We send a one-time code.</span></div>`;
-    return `
-      <div class="section-head landing-split" id="signin"><div><h2>Sign in or join</h2><p>Wardrobe Passport is a closed community. You join with an invite link from a member.</p></div></div>
-      <div class="signin">
-        <div class="panel signin-card">
-          <span class="role-kicker">Members</span>
-          <h3>Sign in</h3>
-          ${codeForm}
-        </div>
-        <div class="panel signin-card">
-          <span class="role-kicker">New here</span>
-          <h3>Got an invite?</h3>
-          <p>Open the link a member sent you. Each member has a few invites, and their name stays linked to yours, so people invite carefully.</p>
-          <p class="fine">Your first delivery is free (up to $${CFG.rules?.welcomeShippingCredit ?? 10}). Your inviter earns $${CFG.rules?.inviterReward ?? 5} of credit after your first purchase.</p>
-        </div>
-      </div>
+        <div class="row"><input id="si-email" type="email" placeholder="you@example.com" value="${esc(si.email)}"><button class="btn primary" data-action="send-code">Continue</button></div>
+        <span class="hint">We'll email you a one-time code. New here? Open the invite link a member sent you.</span></div>`;
+    openModal("Sign in", `
+      ${codeForm}
       ${state.demo.length ? `
-      <div class="h-label">Try the demo</div>
-      <div class="roles">${state.demo.map((d) => `
-        <button class="role-card" data-demo="${d.handle}">
-          ${avatar(d.name, d.handle)}
-          <span class="role-kicker">${esc(d.label)}</span>
-          <h3>${esc(d.name)}</h3>
-          <p>${d.handle === "maya" ? "Founding member. Gets pieces authenticated, lists them and ships them." : d.handle === "alex" ? "Invited by Maya. Shops the marketplace, confirms or disputes deliveries." : "Partner pawn shop in Atlanta. Checks IDs, authenticates pieces, files dispute reports."}</p>
-          <span class="role-go">Sign in as ${esc(d.name)}</span>
-        </button>`).join("")}</div>
-      ${state.seeded.length ? `<p class="fine">Or sign in as a community member, for example to vote on a dispute panel: ${state.seeded.map((u) => `<button class="chip owned seed-chip" data-demo="${esc(u.handle)}">${esc(u.name)}</button>`).join(" ")}</p>` : ""}` : ""}
-      <p class="fine center">Platform admin? <button class="linkish" data-action="admin-signin">Sign in with the contract's admin wallet (MetaMask)</button></p>
-      ${explainHtml()}`;
+      <div class="or"><span>or try the demo</span></div>
+      <div class="demo-list">${state.demo.map((d) => `
+        <button class="demo-row" data-demo="${d.handle}">${avatar(d.name, d.handle)}<span><b>${esc(d.name)}</b><small>${d.handle === "maya" ? "Seller" : d.handle === "alex" ? "Buyer" : "Pawn shop"}</small></span><span class="go">Continue</span></button>`).join("")}</div>
+      ${state.seeded.length ? `<p class="fine">Vote on disputes as a member: ${state.seeded.map((u) => `<button class="chip owned seed-chip" data-demo="${esc(u.handle)}">${esc(u.name)}</button>`).join(" ")}</p>` : ""}` : ""}
+      <p class="fine center"><button class="linkish" data-action="admin-signin">Platform admin: sign in with MetaMask</button></p>
+    `, (m) => { m.classList.add("narrow"); ($("#si-code", m) || $("#si-email", m))?.focus(); });
   }
 
   function renderJoin() {
@@ -675,7 +649,7 @@
       </div>
       ${moneyTip()}`;
     if (!canSell) {
-      html += `<div class="callout held"><strong>One step before you can sell: get your ID checked.</strong><br>Visit a partner pawn shop${activePartners()[0] ? ` such as ${esc(activePartners()[0].name)}, ${esc(activePartners()[0].city)}` : ""} with a photo ID. You can add pieces and get them authenticated now; listing unlocks once your ID is checked.</div>${memberCard(v)}`;
+      html += `<div class="callout held"><strong>Get your ID checked to start selling.</strong> Show this code and a photo ID at ${activePartners()[0] ? esc(activePartners()[0].name) : "a partner pawn shop"}.</div>${memberCard(v)}`;
     }
     html += tiles([[mine.length, "pieces"], [waiting.length, "waiting for a pawn shop"], [listed.length, "for sale"], [toShip.length, "to ship"], [usd(earned), "earned from sales"]]);
 
@@ -695,7 +669,6 @@
       html += `<div class="done-list">` + todo.map(([i, line, cta]) => `
         <button class="done" data-open="${i.id}">${art(i, "mini")}<span><strong>${esc(i.name)}</strong><small>${esc(line)}</small></span><span class="done-cta">${cta}</span></button>`).join("") + `</div>`;
     }
-    html += `<div class="h-label">How a sale works</div><div class="panel">${stepsHtml()}</div>`;
     return html;
   }
 
@@ -704,7 +677,7 @@
     const dis = state.busy || readOnly() ? "disabled" : "";
     const head = `
       <div class="section-head">
-        <div><h2>My pieces</h2><p>${plural(mine.length, "piece", "pieces")} · each one is authenticated before it can be listed</p></div>
+        <div><h2>My pieces</h2><p>${plural(mine.length, "piece", "pieces")}</p></div>
         <button class="btn primary" data-action="add-item" ${dis}>+ Add a piece</button>
       </div>`;
     if (!mine.length) return head + `<div class="empty"><h3>No pieces yet</h3><p>Add a piece and it gets a digital passport.</p><button class="btn gold" data-action="add-item" ${dis}>Add your first piece</button></div>`;
@@ -713,16 +686,11 @@
 
   // ------------------------------------------------------------------- buyer
   function renderShop() {
-    const forSale = state.items.filter((i) => i.status === STATUS.LISTED && !same(i.owner, myAddr()) && !paused(i)).reverse();
-    const capNote = !isVerified(myAddr()) && !readOnly() ? `<p class="tip boxed">New members can buy pieces up to $50. Get your ID checked at a partner pawn shop to lift the limit.</p>` : "";
-    const head = `
-      <div class="section-head">
-        <div><h2>Marketplace</h2><p>Every piece was checked in person by a pawn shop. Your money is held until it arrives.</p></div>
-      </div>${moneyTip()}${capNote}`;
-    if (!forSale.length) return head + `<div class="empty"><h3>Nothing for sale right now</h3><p>Pieces appear here once a pawn shop has verified them and a verified member has listed them.</p></div>`;
-    return head + `<div class="grid">${forSale.map((i) => card(i, `
-      <span class="price">${usd(i.price)}</span>
-      <span class="chip ok" title="${esc(recText(i.owner))}">${esc(nameOf(i.owner))} · ${recOf(i.owner).sold} sold</span>`)).join("")}</div>`;
+    const forSale = listedNow().filter((i) => !same(i.owner, myAddr())).filter(matches).reverse();
+    const capNote = !isVerified(myAddr()) && !readOnly() ? `<p class="tip boxed">You can buy pieces up to $50 until your ID is checked.</p>` : "";
+    return `${moneyTip()}${capNote}${chipsHtml()}
+      ${forSale.length ? `<div class="lgrid">${forSale.map((i) => card(i, "")).join("")}</div>`
+        : `<div class="empty slim"><p>${state.q || state.cat !== "all" ? "Nothing matches. Try another category or search." : "Nothing for sale right now."}</p></div>`}`;
   }
 
   function renderMine() {
@@ -820,7 +788,7 @@
     const disputes = myShopDisputes();
     let html = `
       <div class="section-head">
-        <div><h2>${esc(p.name)} · ${esc(p.city)}</h2><p>Partner pawn shop${p.active ? "" : " (paused)"} · earns ${Number(FEE_BPS) / 100}% of each sale it authenticates</p></div>
+        <div><h2>${esc(p.name)} · ${esc(p.city)}</h2><p>Partner pawn shop${p.active ? "" : " (paused)"}</p></div>
       </div>
       ${moneyTip()}
       ${tiles([[unverifiedMembers().length, "IDs to check"], [requests.length, "pieces to verify"], [disputes.length, "open disputes"], [p.membersVerified, "members ID-checked"], [p.authenticated, "pieces authenticated"], [usd(myBalance()), "balance"]])}`;
@@ -829,7 +797,7 @@
       html += `
         <div class="h-label">Check a member's ID</div>
         <div class="panel">
-          <p style="margin-top:0">Ask for the member's code (on their phone, under Sell or Community → Invites) and a photo ID. Check the name matches, then record it on Arc. This unlocks selling and puts them in the pool for dispute panels.</p>
+          <p style="margin-top:0">Enter the member's code, check their photo ID, then record it.</p>
           <div class="row"><input id="fd-code" type="text" placeholder="Member code, e.g. priya-3f9a" ${dis}><button class="btn primary" data-action="fd-lookup" ${dis}>Look up</button></div>
           <div id="fd-result"></div>
         </div>
@@ -875,7 +843,7 @@
         <h3>${esc(i.name)} <small class="muted">Passport #${i.id}</small></h3>
         <p>${esc(i.brand || "No brand")}${i.details ? ` · ${esc(i.details)}` : ""}</p>
         <span class="chip held">${esc(nameOf(i.owner))} asked on ${fmtDate(reqOf(i.id).createdAt)}</span>
-        <p class="fine">Owner: ${esc(levelOf(i.owner).label)} · ${esc(recText(i.owner))}. Inspect the piece in person before you stamp it.</p>
+        <p class="fine">Inspect it in person before you stamp it.</p>
         <div class="actions">
           <button class="btn gold" data-action="auth" data-id="${i.id}" ${dis}>Authenticate</button>
           <button class="btn ghost" data-action="decline" data-id="${i.id}" ${dis}>Can't verify</button>
@@ -960,10 +928,10 @@
   function renderLedger() {
     const rows = state.ledger.filter((r) => r.action !== "fund" || readOnly());
     return `
-      <div class="section-head"><div><h2>Community ledger</h2><p>Every action in the community, newest first. Each one links to its transaction on Arc, so you don't have to trust this page.</p></div></div>
+      <div class="section-head"><div><h2>Community ledger</h2><p>Every action, with proof on Arc.</p></div></div>
       ${tiles([[stats().members, "members"], [stats().verified, "ID-checked"], [stats().passports, "passports"], [stats().sales, "sales settled"], [usd(stats().held), "held right now"], [stats().open, "open disputes"]])}
       <div class="panel ledger">${rows.length ? rows.map(ledgerLine).join("") : `<p class="muted">Nothing yet.</p>`}</div>
-      <p class="fine">Contract: <a href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">${short(CFG.contractAddress)} on Arc ↗</a>. Arc is a public chain: anyone can verify these records. Only members can take part.</p>`;
+      `;
   }
 
   function renderPeople() {
@@ -984,7 +952,7 @@
     };
     const roots = members.filter((u) => !u.invitedBy || !members.some((m) => m.handle === u.invitedBy));
     return `
-      <div class="section-head"><div><h2>Members</h2><p>${plural(members.length, "member", "members")} · shown by who invited whom. Records are read from Arc and can't be edited.</p></div></div>
+      <div class="section-head"><div><h2>Members</h2><p>${plural(members.length, "member", "members")}, grouped by who invited whom.</p></div></div>
       <div class="panel people">${roots.map((u) => row(u, 0)).join("") || `<p class="muted">No members yet.</p>`}</div>
       <div class="h-label">Partner pawn shops</div>
       <div class="panel people">${shops.map((p) => `
@@ -997,7 +965,7 @@
     const mine = myPanelDuty();
     const open = openDisputes().filter((d) => !mine.includes(d));
     const closed = state.disputes.filter((d) => d.resolved).reverse();
-    let html = `<div class="section-head"><div><h2>Disputes</h2><p>Decided by a panel of 5 ID-checked members drawn at random, never the buyer, the seller, the people who invited them, or the pawn shop. The contract counts the votes and pays out.</p></div></div>`;
+    let html = `<div class="section-head"><div><h2>Disputes</h2><p>Five random members decide. The contract pays out.</p></div></div>`;
     if (mine.length) html += `<div class="h-label">You're on the panel</div>` + mine.map((d) => disputeCard(d)).join("");
     html += `<div class="h-label">Open</div>` + (open.length ? open.map((d) => disputeCard(d)).join("") : `<div class="empty slim"><p>No open disputes.</p></div>`);
     if (closed.length) html += `<div class="h-label">Decided</div>` + closed.map((d) => disputeCard(d)).join("");
@@ -1014,10 +982,10 @@
     const a = me.allowance || { left: 0, total: 0, used: 0 };
     const credits = me.credits || [];
     return `
-      <div class="section-head"><div><h2>Invites & credits</h2><p>Invite people you'd trade with. Their record is linked to yours.</p></div>
+      <div class="section-head"><div><h2>Invites & credits</h2><p>Invite people you'd trade with.</p></div>
         <button class="btn gold" data-action="new-invite" ${a.left > 0 && !state.busy ? "" : "disabled"}>+ New invite link</button></div>
       ${tiles([[a.left, "invites left"], [a.used, "sent"], [credits.filter((c) => !c.usedAt).reduce((s, c) => s + c.dollars, 0).toLocaleString("en-US", { style: "currency", currency: "USD" }), "credit available"]])}
-      <p class="fine">You start with ${CFG.rules?.startInvites ?? 3} invites and earn one more for each completed sale without a lost dispute, up to ${CFG.rules?.maxOpenInvites ?? 10}. If someone you invited loses a dispute, it shows on your record too.</p>
+      <p class="fine">Earn an invite for each clean sale. Their disputes show on your record.</p>
       <div class="h-label">Your invite links</div>
       ${me.invites.length ? `<div class="done-list">${me.invites.map((i) => `
         <div class="done static"><span class="inv-ico">✉</span><span><strong>${i.usedBy ? `Used by ${esc(i.usedBy)}` : "Not used yet"}</strong><small class="mono-inline">${esc(inviteUrl(i.code))}</small></span>
@@ -1057,7 +1025,7 @@
     }
     if (state.tab === "side") return renderSideBySide();
     return `
-      <div class="section-head"><div><h2>Admin overview</h2><p>The whole community at a glance. Use “View as” on the Members tab to see any member's screens, read-only.</p></div></div>
+      <div class="section-head"><div><h2>Admin overview</h2><p>The whole community at a glance.</p></div></div>
       ${tiles([[s.members, "members"], [s.verified, "ID-checked"], [state.partners.length, "pawn shops"], [s.passports, "passports"], [state.items.filter((i) => i.status === STATUS.LISTED).length, "for sale"], [usd(s.volume), `volume in ${plural(s.sales, "sale", "sales")}`], [usd(s.held), "held in the contract"], [s.open, "open disputes"]])}
       <div class="h-label">Open disputes</div>
       ${openDisputes().length ? openDisputes().map((d) => disputeCard(d, "admin")).join("") : `<div class="empty slim"><p>No open disputes.</p></div>`}
@@ -1085,7 +1053,7 @@
       for (const i of reqs) shops.push(line(i, `${esc(nameOf(i.owner))} asked ${esc(p.name)} to authenticate`, null));
     }
     return `
-      <div class="section-head"><div><h2>Side by side</h2><p>Where every live piece stands, from the seller's, the buyer's and the pawn shop's side.</p></div></div>
+      <div class="section-head"><div><h2>Side by side</h2><p>Every live piece, from each side.</p></div></div>
       <div class="sbs">${col("Sellers", "Pieces on their way to a sale", sellers)}${col("Buyers", "Orders in progress", buyers)}${col("Pawn shops", "Queues waiting for the shop", shops)}</div>`;
   }
 
@@ -1100,6 +1068,7 @@
   function render() {
     document.body.classList.toggle("public", !!state.publicId);
     renderWho();
+    renderSearch();
     renderViewbar();
     renderTabs();
     renderFoot();
@@ -1115,7 +1084,7 @@
     renderHero();
     document.body.classList.toggle("signed-out", !signedIn());
     if (!signedIn()) {
-      const html = renderSignin();
+      const html = renderLanding();
       const typing = view.contains(document.activeElement) && document.activeElement.tagName === "INPUT";
       if (view.dataset.sig !== html && !typing) { view.innerHTML = html; view.dataset.sig = html; }
       return;
@@ -1277,28 +1246,30 @@
     const item = itemById(id);
     if (!item) return;
     const f = facts(item);
-    openModal("Item passport", `
-      ${art(item)}
-      <h4 class="detail-title">${esc(item.name)}</h4>
-      <p class="detail-brand">${esc(item.brand || "No brand")}${item.details ? ` · ${esc(item.details)}` : ""}</p>
-      <div class="detail-links">
-        <a class="verified" href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">✓ Passport #${item.id}, recorded on Arc ↗</a>
-        <button class="btn ghost small" data-action="share" data-id="${item.id}">Share passport</button>
+    const shop = partnerOf(item.authBy);
+    openModal(item.name, `
+      <div class="listing">
+        <div class="listing-photo">${art(item)}</div>
+        <div class="listing-side">
+          <p class="pid-line">Passport No. ${pad(item.id)} · <a href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">on Arc ↗</a></p>
+          <h4 class="detail-title">${esc(item.name)}</h4>
+          <p class="detail-brand">${esc(item.brand || "No brand")}${item.details ? `, ${esc(item.details)}` : ""}</p>
+          ${verified(item) ? `<div class="trust"><span class="ti">✓</span><span><b>Checked in person</b><small>${esc(shop ? `${shop.name}, ${shop.city}` : nameOf(item.authBy))} · ${fmtDate(item.authAt)}</small></span></div>` : authLine(item)}
+          <div class="trust"><span class="ti">${esc((nameOf(item.owner) || "?")[0])}</span><span><b>${esc(nameOf(item.owner))}</b><small>${esc(levelOf(item.owner).label)} · ${esc(recText(item.owner))}</small></span></div>
+          <div class="pricebox">
+            <div class="pb-top"><span class="pb-price">${item.status === STATUS.LISTED ? usd(item.price) : f.lastSale ? usd(f.lastSale.price) : "Not for sale"}</span><small data-status></small></div>
+            <div data-actions></div>
+          </div>
+          <button class="linkish share-link" data-action="share" data-id="${item.id}">Share this passport</button>
+        </div>
       </div>
-      ${authLine(item)}
-      <div class="facts">
-        <div class="fact"><small>Current owner</small><strong>${esc(nameOf(item.owner))}</strong></div>
-        <div class="fact"><small>Owner's record</small><strong>${esc(recText(item.owner))}</strong></div>
-        <div class="fact"><small>Status</small><strong data-status></strong></div>
-        <div class="fact"><small>Last sale</small><strong>${f.lastSale ? usd(f.lastSale.price) : "Never sold"}</strong></div>
-      </div>
-      <div data-actions></div>
-      <div class="h-label">History</div>
+      <h3 class="grid-h">History</h3>
       <ul class="timeline">${timelineHtml(item)}</ul>
-    `);
+    `, (m) => m.classList.add("wide"));
     state.openItemId = id;
     refreshDetailActions();
   }
+
   function partnerSelect(id) {
     const list = activePartners().filter((p) => !same(p.addr, myAddr()));
     if (!list.length) return "";
@@ -1320,9 +1291,13 @@
     const isBuyer = same(item.buyer, myAddr());
     const dis = state.busy || readOnly() ? "disabled" : "";
     const v = viewer();
-    statusEl.textContent = statusText(item) + (paused(item) && item.status === STATUS.LISTED ? " · paused for review" : "");
+    statusEl.textContent = item.status === STATUS.LISTED ? (paused(item) ? "Paused for review" : "Paid on delivery") : statusText(item);
     let html = "";
-    if (v?.role === "partner") {
+    if (!signedIn()) {
+      html = item.status === STATUS.LISTED && !paused(item)
+        ? `<button class="btn gold block" data-action="open-signin">Sign in to buy</button><p class="hint center">Members only. Your money is held until it arrives.</p>`
+        : "";
+    } else if (v?.role === "partner") {
       const r = reqOf(item.id);
       if (r && r.status === "pending" && same(r.partner, myAddr()) && !isOwner && partnerOf(myAddr())) {
         html = `<div class="actions-col"><button class="btn gold block" data-action="auth" data-id="${item.id}" ${dis}>Authenticate this piece</button><button class="btn ghost block" data-action="decline" data-id="${item.id}" ${dis}>Can't verify</button></div>`;
@@ -1368,6 +1343,11 @@
   document.addEventListener("input", (ev) => {
     if (ev.target.id === "list-price") { const hint = document.querySelector("[data-deposit-hint]"); if (hint) hint.textContent = depositHint(ev.target.value); }
     if (ev.target.id === "si-email") state.signin.email = ev.target.value;
+    if (ev.target.id === "q") {
+      state.q = ev.target.value;
+      if (signedIn() && state.view !== "buy" && viewsFor().includes("buy")) { state.view = "buy"; state.tab = "shop"; }
+      render();
+    }
   });
 
   // ------------------------------------------------------------ photos
@@ -1668,12 +1648,13 @@
     document.getElementById(a.dataset.scroll)?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   });
   document.addEventListener("click", async (ev) => {
-    const el = ev.target.closest("[data-view],[data-demo],[data-tab],[data-tab-go],[data-open],[data-action]");
+    const el = ev.target.closest("[data-view],[data-demo],[data-tab],[data-tab-go],[data-open],[data-action],[data-cat]");
     if (!el) return;
+    if (el.dataset.cat) { state.cat = el.dataset.cat; render(); return; }
     if (el.dataset.view) { closeModal(); goView(el.dataset.view); window.scrollTo(0, 0); return; }
     if (el.dataset.demo) {
       clearToasts();
-      try { await api("/api/auth", { op: "demo", handle: el.dataset.demo }); await afterSignIn(); }
+      try { await api("/api/auth", { op: "demo", handle: el.dataset.demo }); closeModal(); await afterSignIn(); }
       catch (e) { toast(friendlyError(e), "error"); }
       return;
     }
@@ -1696,19 +1677,19 @@
         try {
           const r = await api("/api/auth", { op: "send-code", email });
           state.signin = { email, sent: true, demoCode: r.demoCode || null };
-          render();
-          $("#si-code")?.focus();
+          openSignin();
         } catch (e) { toast(friendlyError(e), "error"); }
         break;
       }
-      case "code-reset": state.signin = { email: state.signin.email, sent: false, demoCode: null }; render(); break;
+      case "code-reset": state.signin = { email: state.signin.email, sent: false, demoCode: null }; openSignin(); break;
       case "verify-code": {
         const code = ($("#si-code")?.value || "").trim();
-        try { await api("/api/auth", { op: "verify", email: state.signin.email, code }); await afterSignIn(); }
+        try { await api("/api/auth", { op: "verify", email: state.signin.email, code }); closeModal(); await afterSignIn(); }
         catch (e) { toast(friendlyError(e), "error"); }
         break;
       }
-      case "admin-signin": adminSignIn(); break;
+      case "admin-signin": closeModal(); adminSignIn(); break;
+      case "open-signin": openSignin(); break;
       case "admin-setup": adminOp("setup"); break;
       case "admin-seed": adminOp("seed"); break;
       case "admin-history": adminOp("history"); break;
@@ -1737,6 +1718,7 @@
       case "leave-public": clearHash(); break;
       case "public-buy":
         clearHash();
+        if (!signedIn()) { openSignin(); break; }
         if (state.me?.role === "member") { goTab("shop"); if (item && !same(item.owner, myAddr())) openBuy(id); }
         break;
       case "fund": fundFromTreasury(Number(el.dataset.amount)); break;

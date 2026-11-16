@@ -127,7 +127,7 @@ export async function perform(user: User, action: string, body: any) {
       const hash = await savePhoto(body.photo, user.handle);
       const icon = /^[a-z]{1,12}$/.test(body.icon ?? "") ? body.icon : "other";
       // Photos live in the database; their SHA-256 fingerprint goes on-chain so anyone can verify the photo.
-      fn = "createPassport"; args = [name, text(body.brand, 40, "the brand"), text(body.details, 80, "the details"), hash ? `sha256:${hash}` : `icon:${icon}`];
+      fn = "createPassport"; args = [name, text(body.brand, 40, "the brand"), text(body.details, 80, "the details"), hash ? `sha256:${hash};kind=${icon}` : `icon:${icon}`];
       detail.name = name;
       break;
     }

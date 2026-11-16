@@ -49,10 +49,10 @@ export const SEED_INVITER: Record<string, string> = {
 
 /** Demo history, run by the admin once: real transactions on Arc so the community isn't empty. */
 export const SEED_HISTORY = [
-  { key: "A", seller: "Priya", buyer: "Jordan", name: "Trench coat", brand: "Burberry", details: "Size M, honey colour", icon: "jacket", price: 6, end: "confirm" },
-  { key: "B", seller: "Sam", buyer: "Elena", name: "Seiko 5 automatic", brand: "Seiko", details: "SNK809, new strap", icon: "watch", price: 7, end: "confirm" },
-  { key: "C", seller: "Marcus", buyer: "Aisha", name: "Tabby shoulder bag", brand: "Coach", details: "Black pebbled leather", icon: "bag", price: 5, end: "dispute" },
-  { key: "D", seller: "Grace", buyer: null, name: "Trucker jacket", brand: "Levi's", details: "Size L, vintage wash", icon: "jacket", price: 6, end: "list" },
-  { key: "E", seller: "Tom", buyer: null, name: "Dunk Low", brand: "Nike", details: "US 10, worn once", icon: "shoes", price: 4, end: "list" },
-  { key: "F", seller: "Kofi", buyer: null, name: "Silk scarf", brand: "Hermès", details: "90 cm, with box", icon: "other", price: 0, end: "request" },
+  { key: "A", photo: "trench.jpg", seller: "Priya", buyer: "Jordan", name: "Trench coat", brand: "Burberry", details: "Size M, honey colour", icon: "jacket", price: 6, end: "confirm" },
+  { key: "B", photo: "seiko.jpg", seller: "Sam", buyer: "Elena", name: "Seiko 5 automatic", brand: "Seiko", details: "SNK809, new strap", icon: "watch", price: 7, end: "confirm" },
+  { key: "C", photo: "coach-bag.jpg", seller: "Marcus", buyer: "Aisha", name: "Tabby shoulder bag", brand: "Coach", details: "Black pebbled leather", icon: "bag", price: 5, end: "dispute" },
+  { key: "D", photo: "levis-jacket.jpg", seller: "Grace", buyer: null, name: "Trucker jacket", brand: "Levi's", details: "Size L, vintage wash", icon: "jacket", price: 6, end: "list" },
+  { key: "E", photo: "nike-dunk.jpg", seller: "Tom", buyer: null, name: "Dunk Low", brand: "Nike", details: "US 10, worn once", icon: "shoes", price: 4, end: "list" },
+  { key: "F", photo: "scarf.jpg", seller: "Kofi", buyer: null, name: "Silk scarf", brand: "Hermès", details: "90 cm, with box", icon: "other", price: 0, end: "request" },
 ] as const;

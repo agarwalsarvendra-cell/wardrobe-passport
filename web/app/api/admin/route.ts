@@ -52,14 +52,28 @@ async function loadCtx(): Promise<Ctx> {
 const saveCtx = (c: Ctx) =>
   q("insert into settings (key, value) values ('seed_history', $1) on conflict (key) do update set value = excluded.value", [JSON.stringify(c)]);
 
-function historySteps(people: Record<string, User>, shop: User): { label: string; run: (c: Ctx) => Promise<void> }[] {
+/** A demo photo from /public/seed, if one was added (fetched from our own site so it works on Vercel). */
+async function seedPhoto(origin: string, file: string): Promise<string | null> {
+  try {
+    const r = await fetch(`${origin}/seed/${file}`, { cache: "no-store" });
+    if (!r.ok) return null;
+    const type = r.headers.get("content-type") || "";
+    if (!/^image\/(jpeg|png|webp)/.test(type)) return null;
+    const bytes = Buffer.from(await r.arrayBuffer());
+    if (bytes.length > 380_000) return null; // the app compresses photos on upload; seed photos must already be small
+    return `data:${type.split(";")[0]};base64,${bytes.toString("base64")}`;
+  } catch { return null; }
+}
+
+function historySteps(people: Record<string, User>, shop: User, origin: string): { label: string; run: (c: Ctx) => Promise<void> }[] {
   const steps: { label: string; run: (c: Ctx) => Promise<void> }[] = [];
   for (const h of SEED_HISTORY) {
     const seller = people[h.seller];
     const buyer = h.buyer ? people[h.buyer] : null;
     steps.push({ label: `${h.seller} adds “${h.name}”`, run: async (c) => {
       await ensureFunds(seller, 0.3);
-      const r = await perform(seller, "createPassport", { name: h.name, brand: h.brand, details: h.details, icon: h.icon });
+      const photo = await seedPhoto(origin, h.photo);
+      const r = await perform(seller, "createPassport", { name: h.name, brand: h.brand, details: h.details, icon: h.icon, photo });
       c.items[h.key] = r.id!;
     } });
     steps.push({ label: `${h.seller} asks the shop to authenticate it`, run: async (c) => {
@@ -160,7 +174,7 @@ export async function POST(req: Request) {
     if (body.op === "history") {
       const people = await seededByName();
       if (SEED_MEMBERS.some((n) => !people[n]?.onchain)) throw new UserError("Add the community members first.");
-      const steps = historySteps(people, shop);
+      const steps = historySteps(people, shop, new URL(req.url).origin);
       const ctx = await loadCtx();
       const started = Date.now();
       const done: string[] = [];
