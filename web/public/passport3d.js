@@ -30,59 +30,54 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
   ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }
-const FONT = (w, px) => `${w} ${px}px "Plus Jakarta Sans", system-ui, sans-serif`;
+const FONT = (w, px) => `${w} ${px}px ${getComputedStyle(document.body).fontFamily}`;
 
 // Card faces are drawn on 2D canvases and used as textures.
-function frontTexture() {
-  const c = document.createElement("canvas"); c.width = 1024; c.height = 1400;
-  const g = c.getContext("2d");
-  g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
-  const band = g.createLinearGradient(0, 0, c.width, 0); band.addColorStop(0, ROSE); band.addColorStop(1, "#D70466");
-  g.fillStyle = band; g.fillRect(0, 0, c.width, 170);
-  g.fillStyle = "#fff"; g.font = FONT(800, 58); g.fillText("Wardrobe Passport", 70, 108);
-  g.font = FONT(600, 36); g.textAlign = "right"; g.fillText("No. 000004", c.width - 70, 106); g.textAlign = "left";
-  // photo area with the jacket illustration
-  roundRect(g, 70, 230, c.width - 140, 640, 36); g.fillStyle = "#F3EDE4"; g.fill();
-  g.save(); g.translate(c.width / 2 - 230, 290); g.scale(7.2, 7.2);
-  g.strokeStyle = INK; g.lineWidth = 1.5; g.lineJoin = "round"; g.lineCap = "round"; g.stroke(new Path2D(JACKET));
-  g.beginPath(); g.arc(32, 47, 1.4, 0, 7); g.arc(32, 53, 1.4, 0, 7); g.fillStyle = INK; g.fill();
-  g.restore();
-  g.fillStyle = INK; g.font = FONT(800, 66); g.fillText("Trucker jacket", 70, 990);
-  g.fillStyle = MUTED; g.font = FONT(500, 40); g.fillText("Levi's, size L, vintage wash", 70, 1050);
-  g.fillStyle = INK; g.font = FONT(700, 40); g.fillText("Owners  2", 70, 1150); g.fillText("Last sale  $6.00", 70, 1210);
-  g.fillStyle = MUTED; g.font = FONT(500, 32); g.fillText("Recorded on Arc", 70, 1300);
-  // verified stamp
-  g.save(); g.translate(c.width - 230, 1175); g.rotate(-0.22);
-  g.strokeStyle = ROSE; g.lineWidth = 9; g.beginPath(); g.arc(0, 0, 130, 0, Math.PI * 2); g.stroke();
-  g.lineWidth = 3; g.beginPath(); g.arc(0, 0, 112, 0, Math.PI * 2); g.stroke();
-  g.fillStyle = ROSE; g.textAlign = "center"; g.font = FONT(800, 44); g.fillText("VERIFIED", 0, -6);
-  g.font = FONT(700, 26); g.fillText("IN PERSON", 0, 34); g.fillText("✓", 0, 76);
-  g.restore();
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+const S = 2; // draw faces at 2048 x 2800 so text stays sharp when the card turns
+let MAX_ANISO = 8;
+function texture(c) {
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = MAX_ANISO;
+  t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = true;
   return t;
 }
+function frontTexture() {
+  const c = document.createElement("canvas"); c.width = 1024 * S; c.height = 1400 * S;
+  const g = c.getContext("2d"); g.scale(S, S);
+  g.fillStyle = "#fff"; g.fillRect(0, 0, 1024, 1400);
+  const band = g.createLinearGradient(0, 0, 1024, 0); band.addColorStop(0, ROSE); band.addColorStop(1, "#D70466");
+  g.fillStyle = band; g.fillRect(0, 0, 1024, 190);
+  g.fillStyle = "#fff"; g.font = FONT(800, 70); g.fillText("Passport", 70, 122);
+  g.font = FONT(700, 46); g.textAlign = "right"; g.fillText("No. 4", 954, 120); g.textAlign = "left";
+  roundRect(g, 70, 250, 884, 600, 40); g.fillStyle = "#F3EDE4"; g.fill();
+  g.save(); g.translate(512 - 220, 300); g.scale(6.9, 6.9);
+  g.strokeStyle = INK; g.lineWidth = 1.7; g.lineJoin = "round"; g.lineCap = "round"; g.stroke(new Path2D(JACKET));
+  g.beginPath(); g.arc(32, 47, 1.5, 0, 7); g.arc(32, 53, 1.5, 0, 7); g.fillStyle = INK; g.fill();
+  g.restore();
+  g.fillStyle = INK; g.font = FONT(800, 84); g.fillText("Trucker jacket", 70, 990);
+  g.fillStyle = MUTED; g.font = FONT(600, 52); g.fillText("Levi's · size L", 70, 1066);
+  g.fillStyle = INK; g.font = FONT(800, 56); g.fillText("$6.00", 70, 1230);
+  g.fillStyle = MUTED; g.font = FONT(600, 40); g.fillText("2 owners", 70, 1290);
+  g.save(); g.translate(790, 1210); g.rotate(-0.2);
+  g.strokeStyle = ROSE; g.lineWidth = 12; g.beginPath(); g.arc(0, 0, 140, 0, Math.PI * 2); g.stroke();
+  g.lineWidth = 4; g.beginPath(); g.arc(0, 0, 120, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = ROSE; g.textAlign = "center"; g.font = FONT(800, 54); g.fillText("VERIFIED", 0, 10);
+  g.font = FONT(800, 36); g.fillText("✓", 0, 62);
+  g.restore();
+  return texture(c);
+}
 function backTexture() {
-  const c = document.createElement("canvas"); c.width = 1024; c.height = 1400;
-  const g = c.getContext("2d");
-  g.fillStyle = "#FFF7F8"; g.fillRect(0, 0, c.width, c.height);
-  g.fillStyle = INK; g.font = FONT(800, 60); g.fillText("Ownership history", 70, 150);
-  g.fillStyle = MUTED; g.font = FONT(500, 34); g.fillText("Every step, recorded on Arc", 70, 205);
-  const rows = [
-    ["Passport issued", "Grace, Nov 2026"],
-    ["Authenticated in person", "Demo Pawn Shop, Atlanta"],
-    ["Listed for $6.00", "10% seller deposit locked"],
-    ["Paid, money held", "Released after delivery"],
-    ["Passport moved", "To the new owner"],
-  ];
-  rows.forEach(([a, b], i) => {
-    const y = 330 + i * 200;
-    g.fillStyle = i < 2 ? ROSE : INK; g.beginPath(); g.arc(100, y - 14, 18, 0, Math.PI * 2); g.fill();
-    if (i < rows.length - 1) { g.fillStyle = "#E7D9DC"; g.fillRect(97, y + 14, 6, 160); }
-    g.fillStyle = INK; g.font = FONT(700, 44); g.fillText(a, 150, y);
-    g.fillStyle = MUTED; g.font = FONT(500, 34); g.fillText(b, 150, y + 52);
+  const c = document.createElement("canvas"); c.width = 1024 * S; c.height = 1400 * S;
+  const g = c.getContext("2d"); g.scale(S, S);
+  g.fillStyle = "#FFF7F8"; g.fillRect(0, 0, 1024, 1400);
+  g.fillStyle = INK; g.font = FONT(800, 74); g.fillText("History", 70, 160);
+  const rows = ["Passport issued", "Checked in person", "Listed for $6", "Money held", "Sold to new owner"];
+  rows.forEach((a, i) => {
+    const y = 330 + i * 220;
+    g.fillStyle = i < 2 ? ROSE : INK; g.beginPath(); g.arc(104, y - 18, 22, 0, Math.PI * 2); g.fill();
+    if (i < rows.length - 1) { g.fillStyle = "#E7D9DC"; g.fillRect(100, y + 14, 8, 180); }
+    g.fillStyle = INK; g.font = FONT(700, 58); g.fillText(a, 160, y);
   });
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
-  return t;
+  return texture(c);
 }
 
 // A thin card with rounded corners: extruded rounded rectangle.
@@ -118,11 +113,12 @@ function mount(stage) {
   try { gl = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); }
   catch { stage.classList.add("no3d"); return; } // no WebGL: the list fallback stays visible
   gl.setPixelRatio(Math.min(devicePixelRatio, 2));
+  MAX_ANISO = gl.capabilities.getMaxAnisotropy();
   gl.outputColorSpace = THREE.SRGBColorSpace;
   gl.toneMapping = THREE.ACESFilmicToneMapping; gl.toneMappingExposure = 1.05;
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 50);
+  const camera = new THREE.PerspectiveCamera(29, 1, 0.1, 50);
   camera.position.set(0, 0.15, 6.2);
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0xf3d9de, 1.6));
@@ -132,7 +128,7 @@ function mount(stage) {
   const W = 1.9, H = 2.6, R = 0.14, D = 0.06;
   const card = new THREE.Group();
   const body = new THREE.Mesh(cardGeometry(W, H, R, D), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.45, metalness: 0.05 }));
-  const faceMat = (map) => new THREE.MeshStandardMaterial({ map, emissiveMap: map, emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.6 });
+  const faceMat = (map) => new THREE.MeshStandardMaterial({ map, emissiveMap: map, emissive: 0xffffff, emissiveIntensity: 0.75, roughness: 0.6 });
   const front = new THREE.Mesh(faceGeometry(W - 0.02, H - 0.02, R), faceMat(frontTexture()));
   front.position.z = D / 2 + 0.017;
   const back = new THREE.Mesh(faceGeometry(W - 0.02, H - 0.02, R), faceMat(backTexture()));
