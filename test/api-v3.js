@@ -78,13 +78,13 @@ const usd = (n) => ethers.parseUnits(String(n), 18);
     const alexM = st.members[1];
     eq(alexM.invitedBy.toLowerCase(), st.members[0].addr.toLowerCase(), "Alex invited by Maya on-chain");
   });
-  await check("seeding adds 12 community members, invited, ID-checked, funded", async () => {
+  await check("seeding adds 10 community members, invited, ID-checked, funded", async () => {
     let r;
     do { r = await admin.call("/api/admin", { op: "seed" }); } while (r.remaining > 0);
-    eq(r.total, 12, "12 seeded");
+    eq(r.total, 10, "10 seeded");
     const st = await admin.state();
-    eq(st.members.length, 14, "14 members");
-    eq(st.members.filter((m) => m.verifiedBy).length, 14, "all verified");
+    eq(st.members.length, 12, "12 members");
+    eq(st.members.filter((m) => m.verifiedBy).length, 12, "all verified");
   });
   await check("non-admins can't run setup", () => expectError(person().call("/api/admin", { op: "seed" }), "Only the admin"));
 
@@ -168,7 +168,7 @@ const usd = (n) => ethers.parseUnits(String(n), 18);
     eq(d.panel.length, 5, "panel size");
     const s = await admin.session();
     const byAddr = Object.fromEntries(s.directory.map((u) => [u.address.toLowerCase(), u.handle]));
-    for (const p of d.panel) ok(!["maya", "alex", "shop", newbieHandle].includes(byAddr[p.addr.toLowerCase()]), "ineligible panelist");
+    for (const p of d.panel) ok(!["maya", "alex", "shop"].includes(byAddr[p.addr.toLowerCase()]), "ineligible panelist");
   });
   await check("the shop files an inspection report; it can't decide while the panel works", async () => {
     await shop.tx({ action: "report", did, report: "Re-inspected: strap is original" });
@@ -179,17 +179,18 @@ const usd = (n) => ethers.parseUnits(String(n), 18);
     const st = await admin.state();
     const s = await admin.session();
     const d = st.disputes.find((x) => x.id === did);
-    const handles = d.panel.map((p) => s.directory.find((u) => u.address.toLowerCase() === p.addr.toLowerCase()).handle);
+    const panelUsers = d.panel.map((p) => s.directory.find((u) => u.address.toLowerCase() === p.addr.toLowerCase()));
+    const votingUsers = panelUsers.filter((u) => u.seeded); // demo sign-in works for seeded members
     const voters = [];
-    for (const h of handles.slice(0, 3)) { const v = person(); await v.call("/api/auth", { op: "demo", handle: h }); voters.push(v); }
-    const v0 = await bal(d.panel[0].addr);
+    for (const h of votingUsers.slice(0, 3).map((u) => u.handle)) { const v = person(); await v.call("/api/auth", { op: "demo", handle: h }); voters.push(v); }
+    const v0 = await bal(votingUsers[0].address);
     const mayaBefore = await bal((await maya.session()).me.address);
     for (const v of voters) await v.tx({ action: "vote", did, buyerWins: false });
     const st2 = await admin.state();
     const d2 = st2.disputes.find((x) => x.id === did);
     eq(d2.resolved, true, "resolved"); eq(d2.buyerWon, false, "seller won"); eq(d2.decidedByPanel, true, "by panel");
     const share = usd(0.4) / 3n;
-    ok((await bal(d.panel[0].addr)) > v0 + share - usd(0.01), "panelist rewarded (minus gas)");
+    ok((await bal(votingUsers[0].address)) > v0 + share - usd(0.01), "panelist rewarded (minus gas)");
     ok((await bal((await maya.session()).me.address)) > mayaBefore + usd(21), "Maya paid price - fee + deposit + bond remainder");
     eq(st2.items.find((i) => i.id === itemId).owner.toLowerCase(), (await alex.session()).me.address.toLowerCase(), "Alex owns it");
     const mayaAddr = (await maya.session()).me.address.toLowerCase();

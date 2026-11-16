@@ -27,7 +27,7 @@ with sync_playwright() as p:
         pg.wait_for_timeout(500); pg.screenshot(path=f"{SHOTS}/v3-{name}.png", full_page=full)
 
     pg = page_for()
-    pg.goto(URL); expect(pg.get_by_role("heading", name="Members only")).to_be_visible(timeout=30000)
+    pg.goto(URL); expect(pg.get_by_role("heading", name="Sign in or join")).to_be_visible(timeout=30000)
     shot(pg, "01-signin")
     # invite page
     pg.goto(URL + "#invite=doesnotexist"); expect(pg.get_by_text("This invite can't be used")).to_be_visible(timeout=15000)
@@ -40,13 +40,13 @@ with sync_playwright() as p:
     pg.get_by_role("tab", name=re.compile("^Disputes")).click(); shot(pg, "06-disputes")
     pg.get_by_role("tab", name=re.compile("^Invites")).click(); shot(pg, "07-invites")
     shot(pg, "07a-maya-no-invites-left")
-    pg.get_by_role("button", name="Sign out").click(); expect(pg.get_by_role("heading", name="Members only")).to_be_visible(timeout=15000)
+    pg.get_by_role("button", name="Sign out").click(); expect(pg.get_by_role("heading", name="Sign in or join")).to_be_visible(timeout=15000)
     pg.locator(".seed-chip").nth(3).click(); expect(pg.locator(".vbtn", has_text="Community")).to_be_visible(timeout=20000)
     pg.locator(".vbtn", has_text="Community").click(); pg.get_by_role("tab", name=re.compile("^Invites")).click()
     pg.get_by_role("button", name="+ New invite link").click(); expect(pg.locator(".toast.ok")).to_be_visible(timeout=10000)
     pg.wait_for_timeout(800); shot(pg, "07b-invite-created")
     code = re.search(r"#invite=([A-Za-z0-9_-]+)", pg.locator(".mono-inline").first.inner_text()).group(1)
-    pg.get_by_role("button", name="Sign out").click(); expect(pg.get_by_role("heading", name="Members only")).to_be_visible(timeout=15000)
+    pg.get_by_role("button", name="Sign out").click(); expect(pg.get_by_role("heading", name="Sign in or join")).to_be_visible(timeout=15000)
     # join through the invite in the browser
     pg.goto(URL + "#invite=" + code); expect(pg.get_by_text(re.compile("invited you to Wardrobe Passport"))).to_be_visible(timeout=15000); shot(pg, "08-join")
     pg.fill("#j-name", "Browser Joiner"); pg.fill("#j-email", EMAIL); pg.get_by_role("button", name="Join the community").click()

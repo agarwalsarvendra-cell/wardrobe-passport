@@ -128,9 +128,9 @@
     const u = dirByAddr(addr);
     if (u) return u.name;
     if (same(addr, state.admin)) return "Platform admin";
-    return `Member ${short(addr)}`;
+    return signedIn() ? `Member ${short(addr)}` : "A verified member";
   }
-  const COLORS = ["#c9a45c", "#8fb8a8", "#b9a3d6", "#e3a07a", "#9cb3d8", "#d8a3b5", "#a8c47c", "#d6c27a"];
+  const COLORS = ["#D1FAE5", "#E7E5E4", "#FEF3C7", "#E0E7FF", "#FCE7F3", "#CFFAFE", "#ECFCCB", "#F5F5F4"];
   const colorOf = (s) => COLORS[[...String(s || "")].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
   const avatar = (name, key, cls = "avatar") => `<span class="${cls}" style="background:${colorOf(key || name)}">${esc((name || "?")[0])}</span>`;
 
@@ -477,22 +477,96 @@
   const STEPS = ["Join by invitation", "ID checked at a pawn shop", "Pawn shop authenticates the piece", "Buyer pays, money is held", "Ship, then confirm or dispute", "A panel of members decides disputes"];
   const stepsHtml = () => `<ol class="steps">${STEPS.map((t, i) => `<li><span>${i + 1}</span>${t}</li>`).join("")}<li class="how-link"><button class="linkish" data-action="how">How it works on Arc</button></li></ol>`;
 
+  // The landing hero shows a real passport from the community: the thing only this product has.
+  function heroItem() {
+    const listed = state.items.filter((i) => i.status === STATUS.LISTED && verified(i) && !paused(i));
+    const sold = state.items.filter((i) => (state.histories[i.id] || []).some((t) => !isZero(t.from)) && !isZero(i.authBy));
+    return listed[listed.length - 1] || sold[sold.length - 1] || state.items.filter((i) => !isZero(i.authBy)).pop() || null;
+  }
+  function passportCard(item) {
+    if (!item) {
+      // Before the first piece exists, show what a passport looks like, clearly marked as an example.
+      return `
+        <div class="passport" aria-label="Example passport">
+          <div class="stamp">Verified<small>in person</small></div>
+          <div class="passport-head"><span>Example passport</span><b>No. 000001</b></div>
+          <div class="passport-body">${art({ name: "Dive watch", imageUrl: "icon:watch" })}
+            <div><h3>Steel dive watch</h3><p class="pp-brand">Seiko, box and papers</p>
+              <dl><dt>Owner</dt><dd>A member</dd><dt>Checked by</dt><dd>A partner pawn shop</dd><dt>Status</dt><dd>For sale, $120</dd></dl></div></div>
+          <ol class="passport-trail">
+            <li class="on"><i></i><span>Passport issued</span><small>on Arc</small></li>
+            <li class="on"><i></i><span>Authenticated in person</span><small>pawn shop</small></li>
+            <li><i></i><span>Buyer's money held until it arrives</span><small>contract</small></li>
+          </ol>
+        </div>`;
+    }
+    const f = facts(item);
+    const shop = partnerOf(item.authBy);
+    const trail = [[true, "Passport issued", fmtDate(f.created)]];
+    if (!isZero(item.authBy)) trail.push([true, `Authenticated by ${esc(nameOf(item.authBy))}`, fmtDate(item.authAt)]);
+    for (const t of f.sales.slice(-1)) trail.push([true, `Sold for ${usd(t.price)}, payment released`, fmtDate(t.at)]);
+    if (item.status === STATUS.LISTED) trail.push([false, `For sale at ${usd(item.price)}, money held on purchase`, "now"]);
+    return `
+      <div class="passport" aria-label="Passport ${item.id} from the community">
+        ${verified(item) ? `<div class="stamp">Verified<small>${esc(shop ? shop.city : "in person")}</small></div>` : ""}
+        <div class="passport-head"><span>A passport from the community</span><b>No. ${pad(item.id)}</b></div>
+        <div class="passport-body">${art(item)}
+          <div><h3>${esc(item.name)}</h3><p class="pp-brand">${esc(item.brand || "No brand")}${item.details ? `, ${esc(item.details)}` : ""}</p>
+            <dl><dt>Owner</dt><dd>${esc(nameOf(item.owner))}</dd><dt>Owners so far</dt><dd>${f.owners}</dd><dt>Status</dt><dd>${esc(statusText(item))}</dd></dl></div></div>
+        <ol class="passport-trail">${trail.map(([on, t, d]) => `<li class="${on ? "on" : ""}"><i></i><span>${t}</span><small>${esc(d)}</small></li>`).join("")}</ol>
+      </div>`;
+  }
+
   function renderHero() {
     const el = $("#hero");
     if (!state.loaded || signedIn() || state.inviteCode) { el.innerHTML = ""; return; }
     const s = stats();
-    el.innerHTML = `
+    const html = `
       <div class="hero-copy">
-        <h2>A resale community you can trust.</h2>
-        <p>Members join by invitation and have their ID checked in person at a partner pawn shop. Every piece is authenticated before it's listed, the buyer's money is held until it arrives, and if something goes wrong, a panel of members decides. All of it is recorded on Arc.</p>
-        ${stepsHtml()}
+        <h2>Second-hand, from people you can vouch for.</h2>
+        <p>Wardrobe Passport is an invite-only community for buying and selling pre-owned clothes, bags and watches. Every member's ID is checked in person, every piece is authenticated before it's listed, and the money waits in a contract on Arc until the buyer has the item.</p>
+        <ul class="hero-facts" aria-label="Live from Arc">
+          <li><strong>${s.members}</strong><small>members</small></li>
+          <li><strong>${s.verified}</strong><small>ID-checked</small></li>
+          <li><strong>${s.sales}</strong><small>sales settled</small></li>
+          <li><strong>${s.disputes}</strong><small>disputes decided</small></li>
+        </ul>
+        <div class="row hero-cta"><a class="btn primary" href="#signin" data-scroll="signin">Try the demo</a><a class="btn ghost" href="#explain-h" data-scroll="explain-h">How it works</a></div>
       </div>
-      <div class="hero-stats" aria-label="Live totals from Arc">
-        <div class="stat"><strong>${s.members}</strong><small>members · ${s.verified} ID-checked</small></div>
-        <div class="stat"><strong>${s.passports}</strong><small>passports on Arc</small></div>
-        <div class="stat"><strong>${usd(s.volume)}</strong><small>paid out in ${plural(s.sales, "sale", "sales")}</small></div>
-        <div class="stat"><strong>${s.disputes}</strong><small>disputes decided in the open</small></div>
-      </div>`;
+      ${passportCard(heroItem())}`;
+    if (el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; }
+  }
+
+  // Plain-language explanation for first-time visitors.
+  function explainHtml() {
+    const r = CFG.rules || {};
+    return `
+      <section class="explain" aria-labelledby="explain-h">
+        <h2 id="explain-h">How it works</h2>
+        <p>Buying second-hand from a stranger comes down to three questions. Here is how the community answers each one, and what happens if something goes wrong.</p>
+        <dl class="qa">
+          <div><dt>Who is this person?</dt><dd>You can only join with an invite from a member, and your inviter's name stays linked to yours. Before you can sell, a partner pawn shop checks your photo ID in person.</dd></div>
+          <div><dt>Is the item real?</dt><dd>A pawn shop inspects every piece in person before it can be listed. Its check is stamped on the piece's digital passport, along with every owner and sale price.</dd></div>
+          <div><dt>Will I get it?</dt><dd>Your payment goes into a smart contract, not to the seller. The seller is paid only after you confirm it arrived. The seller also locks a 10% deposit.</dd></div>
+          <div><dt>What if something goes wrong?</dt><dd>Five ID-checked members, picked at random, decide. The pawn shop adds an inspection report. The contract counts the votes and pays out, and every step is public on Arc.</dd></div>
+        </dl>
+        <h2>A sale, step by step</h2>
+        <ol class="flow">
+          <li><b>Get invited</b>A member sends you a link. New members can buy pieces up to $50 right away.</li>
+          <li><b>Get your ID checked</b>Show your member code and a photo ID at a partner pawn shop to unlock selling.</li>
+          <li><b>Get the piece authenticated</b>The shop checks it in person and stamps its passport.</li>
+          <li><b>List it</b>Set a price and lock a 10% deposit. It appears in the members' marketplace.</li>
+          <li><b>Buyer pays, money is held</b>Ship within 5 days. The buyer has 7 days to confirm or open a dispute.</li>
+          <li><b>Everyone gets paid</b>The seller gets the price minus the shop's 3% fee, plus the deposit back. The passport moves to the buyer.</li>
+        </ol>
+        <h2>Who's who</h2>
+        <div class="roles-explain">
+          <div><h3>Members</h3><p>Buy and sell, invite up to ${r.startInvites ?? 3} people to start, and sit on dispute panels. Your record, including how the people you invited behave, is public.</p></div>
+          <div><h3>Partner pawn shops</h3><p>Check IDs at the front desk, authenticate pieces and file inspection reports. They earn 3% of each sale they stand behind.</p></div>
+          <div><h3>The contract</h3><p>Holds the money, enforces who can buy and sell, counts dispute votes and pays everyone. Nobody, including us, can change a record.</p></div>
+        </div>
+        <p class="fine">Your first delivery is free (up to $${r.welcomeShippingCredit ?? 10}). The person who invited you earns $${r.inviterReward ?? 5} of credit after your first purchase. This runs on Arc's test network with test dollars.</p>
+      </section>`;
   }
 
   // ------------------------------------------------------------------ sign in
@@ -508,10 +582,10 @@
         <div class="row"><input id="si-email" type="email" placeholder="you@example.com" value="${esc(si.email)}"><button class="btn primary" data-action="send-code">Send code</button></div>
         <span class="hint">No password. We send a one-time code.</span></div>`;
     return `
-      <div class="section-head"><div><h2>Members only</h2><p>Wardrobe Passport is a closed community. You join with an invite link from a member.</p></div></div>
+      <div class="section-head landing-split" id="signin"><div><h2>Sign in or join</h2><p>Wardrobe Passport is a closed community. You join with an invite link from a member.</p></div></div>
       <div class="signin">
         <div class="panel signin-card">
-          <span class="role-kicker">Already a member</span>
+          <span class="role-kicker">Members</span>
           <h3>Sign in</h3>
           ${codeForm}
         </div>
@@ -530,10 +604,11 @@
           <span class="role-kicker">${esc(d.label)}</span>
           <h3>${esc(d.name)}</h3>
           <p>${d.handle === "maya" ? "Founding member. Gets pieces authenticated, lists them and ships them." : d.handle === "alex" ? "Invited by Maya. Shops the marketplace, confirms or disputes deliveries." : "Partner pawn shop in Atlanta. Checks IDs, authenticates pieces, files dispute reports."}</p>
-          <span class="role-go">Continue →</span>
+          <span class="role-go">Sign in as ${esc(d.name)}</span>
         </button>`).join("")}</div>
       ${state.seeded.length ? `<p class="fine">Or sign in as a community member, for example to vote on a dispute panel: ${state.seeded.map((u) => `<button class="chip owned seed-chip" data-demo="${esc(u.handle)}">${esc(u.name)}</button>`).join(" ")}</p>` : ""}` : ""}
-      <p class="fine center">Platform admin? <button class="linkish" data-action="admin-signin">Sign in with the contract's admin wallet (MetaMask)</button></p>`;
+      <p class="fine center">Platform admin? <button class="linkish" data-action="admin-signin">Sign in with the contract's admin wallet (MetaMask)</button></p>
+      ${explainHtml()}`;
   }
 
   function renderJoin() {
@@ -618,7 +693,7 @@
       html += `<div class="empty slim"><p>Nothing needs you right now${waiting.length ? ". A pawn shop is checking your piece" : listed.length ? ". Your listing is live in the marketplace" : ""}.</p></div>`;
     } else {
       html += `<div class="done-list">` + todo.map(([i, line, cta]) => `
-        <button class="done" data-open="${i.id}">${art(i, "mini")}<span><strong>${esc(i.name)}</strong><small>${esc(line)}</small></span><span class="done-cta">${cta} →</span></button>`).join("") + `</div>`;
+        <button class="done" data-open="${i.id}">${art(i, "mini")}<span><strong>${esc(i.name)}</strong><small>${esc(line)}</small></span><span class="done-cta">${cta}</span></button>`).join("") + `</div>`;
     }
     html += `<div class="h-label">How a sale works</div><div class="panel">${stepsHtml()}</div>`;
     return html;
@@ -970,11 +1045,13 @@
           ${check(!!state.admin && same(state.admin, state.adminAddress), `You're signed in with the contract's admin wallet ${short(state.adminAddress)}`)}
           ${check(!!(shop && partnerOf(shop.address)), `Demo Pawn Shop approved as a partner (addPartner)`)}
           ${check(["maya", "alex"].every((h) => dirBy(h) && isVerified(dirBy(h).address)), "Maya and Alex are members with their IDs checked")}
-          ${check(seeded >= 12, `Community members seeded: ${seeded} of 12`)}
+          ${check(seeded >= 10, `Community members added: ${seeded} of 10`)}
+          ${check(state.ledger.some((r) => r.action === "vote"), "Demo history played: sales, listings and a dispute decided by a member panel")}
         </ul>
         <div class="row">
           <button class="btn gold" data-action="admin-setup" ${dis}>Set up demo accounts</button>
           <button class="btn primary" data-action="admin-seed" ${dis}>Add community members</button>
+          <button class="btn ghost" data-action="admin-history" ${dis}>Play demo history</button>
         </div>
         <p class="fine">The platform wallet must be approved once with setOperator (done in Remix). The treasury pays network fees and gives each new member a little test money: it holds ${treasury ? usd(balanceOf(treasury.address)) : "—"}. Refill it from <a href="${CFG.faucet}" target="_blank" rel="noopener">Circle's faucet</a> at <span class="mono-inline">${esc(treasury?.address || "")}</span>.</p></div>`;
     }
@@ -1549,19 +1626,27 @@
   async function adminOp(op) {
     if (state.busy) return;
     state.busy = true; render();
-    const t = toast(op === "setup" ? "Setting up the demo accounts on Arc…" : "Adding community members on Arc…", "pending");
+    const t = toast(op === "setup" ? "Setting up the demo accounts on Arc…" : op === "seed" ? "Adding community members on Arc…" : "Playing the demo history on Arc…", "pending");
     try {
-      if (op === "setup") {
+      if (op === "history") {
+        let r;
+        do {
+          r = await api("/api/admin", { op: "history" });
+          updateToast(t, `${r.done[r.done.length - 1] || "Working"}… (step ${r.step} of ${r.total})`, "pending");
+          await refresh();
+        } while (!r.finished);
+        updateToast(t, "Demo history done: 2 sales, 2 listings, a piece waiting at the shop, and a dispute the member panel decided.", "ok");
+      } else if (op === "setup") {
         const r = await api("/api/admin", { op: "setup" });
         updateToast(t, r.message, "ok");
       } else {
         let r;
         do {
           r = await api("/api/admin", { op: "seed" });
-          updateToast(t, `Added ${r.added.join(" and ") || "no one new"}. ${r.total} of 12 community members are ready…`, "pending");
+          updateToast(t, `Added ${r.added.join(" and ") || "no one new"}. ${r.total} of 10 community members are ready…`, "pending");
           await connect(); await refresh();
         } while (r.remaining > 0 && r.added.length);
-        updateToast(t, `Community ready: ${r.total} members, each invited, ID-checked and given a little test money.`, "ok");
+        updateToast(t, `Community ready: ${r.total} members, each invited, ID-checked and given a little test money. Next: Play demo history.`, "ok");
       }
       await connect();
       await refresh();
@@ -1576,6 +1661,12 @@
   const clearToasts = () => document.querySelectorAll("#toast-root .toast:not(.pending)").forEach((t) => t.remove());
 
   // ---------------------------------------------------------------- events
+  document.addEventListener("click", (ev) => {
+    const a = ev.target.closest("[data-scroll]");
+    if (!a) return;
+    ev.preventDefault();
+    document.getElementById(a.dataset.scroll)?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  });
   document.addEventListener("click", async (ev) => {
     const el = ev.target.closest("[data-view],[data-demo],[data-tab],[data-tab-go],[data-open],[data-action]");
     if (!el) return;
@@ -1620,6 +1711,7 @@
       case "admin-signin": adminSignIn(); break;
       case "admin-setup": adminOp("setup"); break;
       case "admin-seed": adminOp("seed"); break;
+      case "admin-history": adminOp("history"); break;
       case "view-as":
         ev.stopPropagation();
         state.viewAs = el.dataset.handle; state.view = null; state.tab = null;

@@ -40,6 +40,19 @@ export const SYSTEM_USERS = [
 ] as const;
 
 // Community members seeded for the demo so the ledger and dispute panels have real people.
-export const SEED_MEMBERS = [
-  "Priya", "Jordan", "Sam", "Elena", "Marcus", "Aisha", "Tom", "Grace", "Diego", "Hannah", "Kofi", "Lena",
-];
+export const SEED_MEMBERS = ["Priya", "Jordan", "Sam", "Elena", "Marcus", "Aisha", "Tom", "Grace", "Diego", "Kofi"];
+/** Who invited each seeded member: the first ones by Maya or Alex, later ones by earlier members, so the invite tree looks real. */
+export const SEED_INVITER: Record<string, string> = {
+  Priya: "maya", Jordan: "maya", Sam: "alex", Elena: "alex", Marcus: "Priya",
+  Aisha: "Jordan", Tom: "Sam", Grace: "Priya", Diego: "Elena", Kofi: "Marcus",
+};
+
+/** Demo history, run by the admin once: real transactions on Arc so the community isn't empty. */
+export const SEED_HISTORY = [
+  { key: "A", seller: "Priya", buyer: "Jordan", name: "Trench coat", brand: "Burberry", details: "Size M, honey colour", icon: "jacket", price: 6, end: "confirm" },
+  { key: "B", seller: "Sam", buyer: "Elena", name: "Seiko 5 automatic", brand: "Seiko", details: "SNK809, new strap", icon: "watch", price: 7, end: "confirm" },
+  { key: "C", seller: "Marcus", buyer: "Aisha", name: "Tabby shoulder bag", brand: "Coach", details: "Black pebbled leather", icon: "bag", price: 5, end: "dispute" },
+  { key: "D", seller: "Grace", buyer: null, name: "Trucker jacket", brand: "Levi's", details: "Size L, vintage wash", icon: "jacket", price: 6, end: "list" },
+  { key: "E", seller: "Tom", buyer: null, name: "Dunk Low", brand: "Nike", details: "US 10, worn once", icon: "shoes", price: 4, end: "list" },
+  { key: "F", seller: "Kofi", buyer: null, name: "Silk scarf", brand: "Hermès", details: "90 cm, with box", icon: "other", price: 0, end: "request" },
+] as const;
