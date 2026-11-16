@@ -5,6 +5,7 @@ import type { Pool } from "pg";
 type Row = Record<string, any>;
 interface Db { query(sql: string, params?: any[]): Promise<Row[]> }
 
+// Safe to run on every start: creates what's missing and adds new columns to old tables.
 const SCHEMA = `
 create table if not exists users (
   handle text primary key,
@@ -15,8 +16,14 @@ create table if not exists users (
   address text not null,
   created_at timestamptz not null default now()
 );
+alter table users add column if not exists email text;
+alter table users add column if not exists invited_by text;
+alter table users add column if not exists onchain boolean not null default false;
+alter table users add column if not exists city text;
+alter table users add column if not exists seeded boolean not null default false;
+create unique index if not exists users_email_idx on users (lower(email)) where email is not null;
 create table if not exists photos (
-  hash text primary key,              -- sha256 of the bytes, also written into the passport on Arc
+  hash text primary key,
   mime text not null,
   bytes bytea not null,
   uploaded_by text,
@@ -47,6 +54,43 @@ create table if not exists auth_requests (
   created_at timestamptz not null default now(),
   decided_at timestamptz
 );
+create table if not exists sessions (
+  token_hash text primary key,
+  handle text not null,
+  is_admin boolean not null default false,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+create table if not exists login_codes (
+  key text primary key,
+  code_hash text not null,
+  expires_at timestamptz not null,
+  attempts int not null default 0
+);
+create table if not exists invites (
+  code text primary key,
+  inviter text not null,
+  created_at timestamptz not null default now(),
+  used_by text,
+  used_at timestamptz
+);
+create table if not exists credits (
+  id bigserial primary key,
+  handle text not null,
+  kind text not null,
+  amount_cents int not null,
+  note text,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  used_at timestamptz
+);
+create table if not exists flags (
+  item_id bigint not null,
+  handle text not null,
+  reason text,
+  created_at timestamptz not null default now(),
+  primary key (item_id, handle)
+);
 `;
 
 const g = globalThis as unknown as { __wpDb?: Promise<Db> };
@@ -67,7 +111,7 @@ async function create(): Promise<Db> {
 }
 
 export function db(): Promise<Db> {
-  if (!g.__wpDb) g.__wpDb = create();
+  if (!g.__wpDb) g.__wpDb = create().catch((e) => { g.__wpDb = undefined; throw e; });
   return g.__wpDb;
 }
 export async function q(sql: string, params: any[] = []): Promise<Row[]> {

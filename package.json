@@ -5,6 +5,7 @@
   "description": "Digital passports for the things you own, with resale where the payment is held until delivery. Built on Arc for UBC 2026.",
   "scripts": {
     "test": "node test/run-tests.js",
+    "test:v3": "node test/run-tests-v3.js",
     "devchain": "node test/devchain.js",
     "serve": "python -m http.server 8080 --directory app"
   },

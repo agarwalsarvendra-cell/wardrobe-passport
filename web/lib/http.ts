@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { friendly } from "./chain";
-import { UserError } from "./actions";
+import { UserError } from "./errors";
 
 export const json = (data: unknown, status = 200) =>
   NextResponse.json(data, { status, headers: { "cache-control": "no-store" } });
