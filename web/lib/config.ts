@@ -55,4 +55,13 @@ export const SEED_HISTORY = [
   { key: "D", photo: "levis-jacket.jpg", seller: "Grace", buyer: null, name: "Trucker jacket", brand: "Levi's", details: "Size L, vintage wash", icon: "jacket", price: 6, end: "list" },
   { key: "E", photo: "nike-dunk.jpg", seller: "Tom", buyer: null, name: "Dunk Low", brand: "Nike", details: "US 10, worn once", icon: "shoes", price: 4, end: "list" },
   { key: "F", photo: "scarf.jpg", seller: "Kofi", buyer: null, name: "Silk scarf", brand: "Hermès", details: "90 cm, with box", icon: "other", price: 0, end: "request" },
+  { key: "G", photo: "dress.jpg", seller: "Elena", buyer: null, name: "Linen summer dress", brand: "Reformation", details: "Size S, sage green", icon: "dress", price: 5, end: "list" },
+  { key: "H", photo: "oxford.jpg", seller: "Diego", buyer: null, name: "Oxford shirt", brand: "Ralph Lauren", details: "Size M, white", icon: "top", price: 3, end: "list" },
+  { key: "I", photo: "chinos.jpg", seller: "Jordan", buyer: null, name: "Pleated chinos", brand: "Uniqlo", details: "32 x 30, navy", icon: "trousers", price: 2, end: "list" },
+  { key: "J", photo: "crossbody.jpg", seller: "Aisha", buyer: null, name: "Leather crossbody", brand: "Fossil", details: "Tan, barely used", icon: "bag", price: 4, end: "list" },
+  { key: "K", photo: "field-watch.jpg", seller: "Sam", buyer: null, name: "Field watch", brand: "Timex", details: "Khaki, 38 mm", icon: "watch", price: 5, end: "list" },
+  { key: "L", photo: "overcoat.jpg", seller: "Priya", buyer: null, name: "Wool overcoat", brand: "Zara", details: "Size S, camel", icon: "jacket", price: 5, end: "list" },
+  { key: "M", photo: "runners.jpg", seller: "Kofi", buyer: null, name: "990 running shoes", brand: "New Balance", details: "US 9, light wear", icon: "shoes", price: 4, end: "list" },
+  { key: "N", photo: "tee.jpg", seller: "Marcus", buyer: null, name: "Graphic tee", brand: "Stüssy", details: "Size L, black", icon: "top", price: 2, end: "list" },
+  { key: "O", photo: "aviators.jpg", seller: "Tom", buyer: null, name: "Aviator sunglasses", brand: "Ray-Ban", details: "Gold frame, with case", icon: "other", price: 4, end: "list" },
 ] as const;

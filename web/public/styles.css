@@ -923,3 +923,22 @@ main { max-width: 1280px; padding: 0 40px 56px; }
 body, button, input, select, textarea { font-family: var(--sans); }
 .stage3d { height: 610px; }
 @media (max-width: 640px) { .stage3d { height: auto; } }
+
+/* Meet the community */
+.community { margin-top: 56px; border-top: 1px solid var(--line); padding-top: 8px; }
+.community-head { display: flex; justify-content: space-between; align-items: end; gap: 20px; flex-wrap: wrap; margin: 32px 0 18px; }
+.community-head h2 { font-size: 26px; font-weight: 800; margin: 0 0 6px; }
+.community-head p { margin: 0; color: var(--muted); max-width: 60ch; }
+.shop-card { display: flex; gap: 12px; align-items: center; background: #fff; border-radius: 16px; padding: 12px 16px; box-shadow: var(--lift); }
+.shop-card .avatar { width: 40px; height: 40px; background: var(--gold-soft); color: var(--rose); }
+.shop-card b { display: block; } .shop-card small { color: var(--muted); }
+.people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 16px; }
+.person-card { background: #fff; border: none; border-radius: 16px; padding: 18px 10px 16px; box-shadow: var(--lift); display: flex; flex-direction: column; align-items: center; gap: 6px; transition: transform .15s ease; }
+.person-card:hover { transform: translateY(-2px); }
+.person-card:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.person-card b { font-size: 15px; } .person-card small { color: var(--ok); font-weight: 700; font-size: 13px; }
+.avatar.big-av { width: 56px; height: 56px; font-size: 22px; }
+/* footer aligned with the page */
+.foot { max-width: 1280px; margin: 0 auto; padding: 24px 40px 40px; justify-content: flex-start; }
+@media (max-width: 860px) { .foot { padding: 20px; } }
+@media (prefers-reduced-motion: reduce) { .person-card:hover { transform: none; } }

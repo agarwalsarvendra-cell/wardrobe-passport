@@ -546,7 +546,28 @@
       ${live.length ? `<div class="lgrid">${live.map((i) => card(i, "")).join("")}</div>`
         : `<div class="empty slim"><p>${filtering ? "Nothing matches. Try another category or search." : "Nothing for sale yet."}</p></div>`}
       ${sold.length ? `<h3 class="grid-h">Recently sold</h3><div class="lgrid">${sold.map((i) => card(i, "")).join("")}</div>` : ""}
+      ${communityHtml()}
       ${explainHtml()}`;
+  }
+
+  // The people in the community. Each one can be used to try the app (demo sign-in).
+  function communityHtml() {
+    const people = [...state.demo.filter((d) => d.handle !== "shop"), ...state.seeded];
+    if (!people.length) return "";
+    const shop = state.partners[0];
+    return `
+      <section class="community" aria-labelledby="community-h">
+        <div class="community-head">
+          <div><h2 id="community-h">Meet the community</h2><p>Every member joined by invitation and had their ID checked in person. Tap anyone to try the app as them.</p></div>
+          ${shop ? `<div class="shop-card"><span class="avatar">${esc(shop.name[0])}</span><span><b>${esc(shop.name)}</b><small>${esc(shop.city)} · partner pawn shop · ${shop.membersVerified} IDs checked</small></span></div>` : ""}
+        </div>
+        <div class="people-grid">${people.map((u) => `
+          <button class="person-card" data-demo="${esc(u.handle)}" aria-label="Try the app as ${esc(u.name)}">
+            ${avatar(u.name, u.handle, "avatar big-av")}
+            <b>${esc(u.name)}</b>
+            <small>✓ ID checked</small>
+          </button>`).join("")}</div>
+      </section>`;
   }
 
   function explainHtml() {
