@@ -3,8 +3,8 @@
 // signed-in member's managed wallet to send it.
 import { createHash } from "crypto";
 import { ethers } from "ethers";
-import { CFG, RULES } from "./config";
-import { contract, iface, rpc } from "./chain";
+import { CATEGORIES, CFG, RULES } from "./config";
+import { catKey, contract, iface, piface, protection, protectionOn, rpc } from "./chain";
 import { q } from "./db";
 import { UserError } from "./errors";
 import { getUser, treasury, type User } from "./users";
@@ -33,6 +33,18 @@ const priceWei = (v: unknown): bigint => {
 };
 
 const ZERO = /^0x0{40}$/i;
+const CLAIM_DEPOSIT_BPS = 500n;
+
+/** The category a piece was added under (stored with the piece; the specialist certifies it on-chain). */
+export async function pieceCategory(id: number): Promise<string | null> {
+  const r = await q("select category from piece_meta where item_id = $1", [id]);
+  return r[0]?.category ?? null;
+}
+const dollars = (v: unknown, what: string): bigint => {
+  const n = Number(v);
+  if (!(n > 0) || n > 100_000) throw new UserError(`Please enter an amount for ${what}.`);
+  return ethers.parseUnits(n.toFixed(2), 18);
+};
 const sameAddr = (a: string, b: string) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
 /** A piece counts as verified when a partner authenticated it after it last changed hands. */
@@ -60,7 +72,7 @@ async function offChain(user: User, action: string, body: any) {
     // The pawn shop that stands behind the listing reviews it and clears the flags.
     const id = posInt(body.id);
     const item = await contract().getItem(id);
-    if (!sameAddr(item.partner, user.address) && !sameAddr(item.authBy, user.address)) throw new UserError("Only the pawn shop behind this piece can clear its flags.");
+    if (!sameAddr(item.partner, user.address) && !sameAddr(item.authBy, user.address)) throw new UserError("Only the authenticator behind this piece can clear its flags.");
     await q("delete from flags where item_id = $1", [id]);
     return { hash: null, fee: null, id };
   }
@@ -71,10 +83,14 @@ async function offChain(user: User, action: string, body: any) {
     if (!sameAddr(item.owner, user.address)) throw new UserError("Only the owner can ask for authentication.");
     if (Number(item.status) !== 0) throw new UserError("This piece is already in a sale.");
     if (fresh) throw new UserError("This piece is already authenticated.");
-    if (!ethers.isAddress(body.partner)) throw new UserError("Please choose a pawn shop.");
+    if (!ethers.isAddress(body.partner)) throw new UserError("Please choose an authenticator.");
     const p = await contract().partners(body.partner);
-    if (!p.active) throw new UserError("That pawn shop isn't approved.");
+    if (!p.active) throw new UserError("That authenticator isn't approved.");
     if (sameAddr(body.partner, user.address)) throw new UserError("You can't authenticate your own piece.");
+    const cat = await pieceCategory(id);
+    if (protectionOn() && cat && !(await protection().specialistIn(body.partner, catKey(cat)))) {
+      throw new UserError("That authenticator isn't approved for this category. Choose a specialist.");
+    }
     await q(
       `insert into auth_requests (item_id, requested_by, owner_address, partner_address, status, note, created_at, decided_at)
        values ($1,$2,$3,$4,'pending',null,now(),null)
@@ -107,16 +123,126 @@ async function savePhoto(dataUrl: unknown, handle: string): Promise<string | nul
 const OFF_CHAIN = new Set(["requestAuth", "cancelAuthRequest", "declineAuth", "flag", "unflag", "clearFlags"]);
 
 /** Send one contract call from a member's wallet, after a pre-flight check. */
-export async function send(user: User, fn: string, args: any[], value = 0n) {
-  const callData = iface.encodeFunctionData(fn, args);
+export async function send(user: User, fn: string, args: any[], value = 0n, target: "passport" | "protection" = "passport") {
+  const to = target === "protection" ? CFG.protection : CFG.contract;
+  const callData = (target === "protection" ? piface : iface).encodeFunctionData(fn, args);
   // Pre-flight: a failing call is rejected here with the contract's own reason, before any wallet is asked to sign.
-  await rpc().call({ from: user.address, to: CFG.contract, data: callData, value });
-  return wallets().execute(user, CFG.contract, callData, value);
+  await rpc().call({ from: user.address, to, data: callData, value });
+  return wallets().execute(user, to, callData, value);
+}
+const logActivity = (hash: string, action: string, id: number | null, actor: string, detail: any, fee: bigint | null) =>
+  q("insert into activity (tx_hash, action, item_id, actor, detail, fee_wei) values ($1,$2,$3,$4,$5,$6)",
+    [hash, action, id, actor, JSON.stringify(detail), fee?.toString() ?? null]);
+
+const PROTECTION_ACTIONS = new Set(["stakeBond", "withdrawBond", "poolDeposit", "poolWithdraw", "buyCover", "fileClaim", "decideClaim", "certify"]);
+
+/** Bonds, pool, cover and claims: calls to the protection contract. */
+async function protectionAction(user: User, action: string, body: any) {
+  if (!protectionOn()) throw new UserError("Protection isn't switched on yet.");
+  const P = protection();
+  let fn: string, args: any[] = [], value = 0n, id: number | null = null;
+  const detail: Record<string, any> = {};
+  switch (action) {
+    case "stakeBond":
+      if (user.role !== "partner") throw new UserError("Only authenticators stake a bond.");
+      value = dollars(body.amount, "the bond"); fn = "stakeBond"; detail.amount = value.toString();
+      break;
+    case "withdrawBond":
+      if (user.role !== "partner") throw new UserError("Only authenticators have a bond.");
+      args = [dollars(body.amount, "the withdrawal")]; fn = "withdrawBond"; detail.amount = args[0].toString();
+      break;
+    case "poolDeposit":
+      if (user.role !== "member") throw new UserError("Only members fund the pool.");
+      value = dollars(body.amount, "your stake"); fn = "depositToPool"; detail.amount = value.toString();
+      break;
+    case "poolWithdraw": {
+      if (user.role !== "member") throw new UserError("Only members fund the pool.");
+      const [mine, total, assets] = await Promise.all([P.sharesOf(user.address), P.totalShares(), P.poolAssets()]);
+      if (mine === 0n) throw new UserError("You have nothing in the pool.");
+      let shares: bigint = mine;
+      if (body.amount !== "all") {
+        const want = dollars(body.amount, "the withdrawal");
+        shares = (want * total + assets - 1n) / assets; // round up so you get at least what you asked for
+        if (shares > mine) shares = mine;
+      }
+      args = [shares]; fn = "withdrawFromPool"; detail.amount = ((shares * assets) / total).toString();
+      break;
+    }
+    case "buyCover": {
+      id = posInt(body.id);
+      const qt = await P.quote(id);
+      if (!qt.available) throw new UserError("Protection isn't available for this piece right now.");
+      value = qt.fee; fn = "buyCover"; args = [id];
+      detail.fee = value.toString(); detail.feeBps = Number(qt.feeBps);
+      break;
+    }
+    case "fileClaim": {
+      const cid = posInt(body.cover, "protection");
+      const c = await P.getCover(cid);
+      id = Number(c.itemId);
+      value = (BigInt(c.amount) * CLAIM_DEPOSIT_BPS) / 10000n;
+      fn = "fileClaim"; args = [cid, text(body.evidence, 300, "what you found", true)];
+      detail.cover = cid; detail.deposit = value.toString();
+      break;
+    }
+    case "decideClaim": {
+      const cid = posInt(body.cover, "protection");
+      if (user.role !== "partner") throw new UserError("Only a second authenticator rules on a claim.");
+      id = Number((await P.getCover(cid)).itemId);
+      fn = "decideClaim"; args = [cid, body.fake === true, text(body.ruling, 300, "your ruling", true)];
+      detail.cover = cid; detail.fake = body.fake === true;
+      break;
+    }
+    case "certify": {
+      // Certify an already-authenticated piece (e.g. one stamped before the specialist was approved).
+      id = posInt(body.id);
+      const cat = await pieceCategory(id);
+      if (!cat) throw new UserError("This piece has no category.");
+      fn = "certify"; args = [id, catKey(cat)]; detail.category = cat;
+      break;
+    }
+    default: throw new UserError("Unknown action.");
+  }
+  const res = await send(user, fn, args, value, "protection");
+  await logActivity(res.hash, action, id, user.handle, detail, res.feeWei);
+  return { hash: res.hash, fee: res.feeWei?.toString() ?? null, id };
+}
+
+/**
+ * When a sale ends, start its 90 days of protection (sale completed) or cancel it
+ * and refund the fee (sale cancelled or refunded). The treasury pays the network fee,
+ * so nobody has to remember to do it.
+ */
+export async function settleCover(before: { id: number; buyer: string; paidAt: number }) {
+  if (!protectionOn() || ZERO.test(before.buyer) || !before.paidAt) return;
+  const P = protection();
+  const cid = Number(await P.coverFor(before.id, before.buyer, before.paidAt));
+  if (!cid) return;
+  if (Number((await P.getCover(cid)).state) !== 0) return; // only pending covers
+  const t = await treasury();
+  for (const fn of ["activate", "voidCover"]) {
+    const data = piface.encodeFunctionData(fn, [cid]);
+    try { await rpc().call({ from: t.address, to: CFG.protection, data }); } catch { continue; } // not this one
+    const res = await wallets().execute(t, CFG.protection, data, 0n);
+    await logActivity(res.hash, fn === "activate" ? "coverActivated" : "coverVoided", before.id, "treasury", { cover: cid }, res.feeWei);
+    return;
+  }
+}
+
+/** After a partner stamps a piece, it certifies the category on the protection contract if it's a specialist there. */
+async function certifyAfterAuth(user: User, id: number) {
+  if (!protectionOn()) return;
+  const cat = await pieceCategory(id);
+  if (!cat) return;
+  if (!(await protection().specialistIn(user.address, catKey(cat)))) return;
+  const res = await send(user, "certify", [id, catKey(cat)], 0n, "protection");
+  await logActivity(res.hash, "certify", id, user.handle, { category: cat }, res.feeWei);
 }
 
 export async function perform(user: User, action: string, body: any) {
   if (OFF_CHAIN.has(action)) return offChain(user, action, body);
   if (user.role === "treasury") throw new UserError("The treasury can't do that.");
+  if (PROTECTION_ACTIONS.has(action)) return protectionAction(user, action, body);
   const c = contract();
   let fn: string, args: any[], value = 0n, id: number | null = null;
   const detail: Record<string, any> = {};
@@ -124,8 +250,11 @@ export async function perform(user: User, action: string, body: any) {
   switch (action) {
     case "createPassport": {
       const name = text(body.name, 60, "the name", true);
+      const cat = CATEGORIES.find((c) => c.key === body.category);
+      if (protectionOn() && !cat) throw new UserError("Please choose a category.");
+      if (cat) detail.category = cat.key;
       const hash = await savePhoto(body.photo, user.handle);
-      const icon = /^[a-z]{1,12}$/.test(body.icon ?? "") ? body.icon : "other";
+      const icon = /^[a-z]{1,12}$/.test(body.icon ?? "") ? body.icon : cat?.icon ?? "other";
       // Photos live in the database; their SHA-256 fingerprint goes on-chain so anyone can verify the photo.
       fn = "createPassport"; args = [name, text(body.brand, 40, "the brand"), text(body.details, 80, "the details"), hash ? `sha256:${hash};kind=${icon}` : `icon:${icon}`];
       detail.name = name;
@@ -145,7 +274,7 @@ export async function perform(user: User, action: string, body: any) {
     case "buy": {
       id = posInt(body.id);
       const [{ n }] = await q("select count(*)::int as n from flags where item_id = $1", [id]);
-      if (n >= RULES.flagsToPause) throw new UserError("This listing is paused while the pawn shop reviews flags from members.");
+      if (n >= RULES.flagsToPause) throw new UserError("This listing is paused while the authenticator reviews flags from members.");
       const it = await c.getItem(id);
       value = it.price;
       fn = "buy"; args = [id];
@@ -164,6 +293,10 @@ export async function perform(user: User, action: string, body: any) {
       id = posInt(body.id);
       const rows = await q("select partner_address from auth_requests where item_id = $1 and status = 'pending'", [id]);
       if (!rows[0] || !sameAddr(rows[0].partner_address, user.address)) throw new UserError("The owner hasn't asked you to authenticate this piece.");
+      const cat = await pieceCategory(id);
+      if (protectionOn() && cat && !(await protection().specialistIn(user.address, catKey(cat)))) {
+        throw new UserError("You're not approved as a specialist for this category, so you can't stamp it.");
+      }
       fn = "authenticate"; args = [id, text(body.note, 120, "the note") || "Inspected in store."];
       break;
     }
@@ -212,12 +345,19 @@ export async function perform(user: User, action: string, body: any) {
   }
 
   const before = action === "confirm" ? await c.getItem(id!) : null;
+  // Sales that can end with this call: remember which sale it was, to settle its protection afterwards.
+  const ENDS = ["confirm", "claim", "sellerCancel", "buyerCancel", "vote", "finalize", "resolve"];
+  const sale = ENDS.includes(action) && id ? await c.getItem(id) : null;
   const res = await send(user, fn, args, value);
 
   if (action === "createPassport") {
     const rc = await rpc().getTransactionReceipt(res.hash);
     for (const log of rc?.logs ?? []) {
       try { const p = iface.parseLog(log); if (p?.name === "PassportCreated") id = Number(p.args.id); } catch { /* other log */ }
+    }
+    if (id && detail.category) {
+      await q("insert into piece_meta (item_id, category, set_by) values ($1,$2,$3) on conflict (item_id) do update set category = excluded.category",
+        [id, detail.category, user.handle]);
     }
   }
   if (action === "authenticate") {
@@ -226,6 +366,10 @@ export async function perform(user: User, action: string, body: any) {
   await q("insert into activity (tx_hash, action, item_id, actor, detail, fee_wei) values ($1,$2,$3,$4,$5,$6)",
     [res.hash, action, id, user.handle, JSON.stringify(detail), res.feeWei?.toString() ?? null]);
   if (before) await afterFirstDelivery(user, before).catch((e) => console.warn("credits", e));
+  if (action === "authenticate") await certifyAfterAuth(user, id!).catch((e) => console.warn("certify", e));
+  if (sale && !ZERO.test(sale.buyer)) {
+    await settleCover({ id: id!, buyer: sale.buyer, paidAt: Number(sale.paidAt) }).catch((e) => console.warn("cover", e));
+  }
   return { hash: res.hash, fee: res.feeWei?.toString() ?? null, id };
 }
 

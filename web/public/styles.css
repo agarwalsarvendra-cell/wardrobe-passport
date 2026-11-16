@@ -942,3 +942,60 @@ body, button, input, select, textarea { font-family: var(--sans); }
 .foot { max-width: 1280px; margin: 0 auto; padding: 24px 40px 40px; justify-content: flex-start; }
 @media (max-width: 860px) { .foot { padding: 20px; } }
 @media (prefers-reduced-motion: reduce) { .person-card:hover { transform: none; } }
+
+/* ---------------------------------------------------------------- protection
+   Bonded authentication and 90-day protection. Money and protection use a deep
+   green so they read as "safe" next to the rose actions. */
+:root { --bond: #0B6B4F; --bond-soft: #E6F4EE; }
+.lbadge.bond { background: var(--bond); color: #fff; }
+.lcard-sub.prot-line { color: var(--bond); font-weight: 700; }
+.shop-cards { display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-end; }
+button.shop-card { border: 0; font: inherit; text-align: left; cursor: pointer; }
+button.shop-card:disabled { cursor: default; }
+button.shop-card:not(:disabled):hover { box-shadow: 0 8px 24px rgba(0,0,0,.16); }
+
+.pitch { display: grid; grid-template-columns: 1.2fr 1fr; gap: 32px; align-items: center; margin: 48px 0 8px; padding: 32px; border-radius: 24px; background: var(--bond-soft); }
+.pitch h2 { margin: 0 0 10px; font-size: 28px; line-height: 1.15; letter-spacing: -.01em; }
+.pitch p { margin: 0; color: #2E3B35; font-size: 16px; line-height: 1.55; max-width: 60ch; }
+.pitch-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pitch-facts div { background: #fff; border-radius: 16px; padding: 16px; }
+.pitch-facts b { display: block; font-size: 24px; color: var(--bond); }
+.pitch-facts small { color: var(--muted); font-size: 14px; }
+@media (max-width: 760px) { .pitch { grid-template-columns: 1fr; padding: 22px; } .shop-cards { justify-content: flex-start; } }
+
+.prot-quote, .prot-offer, .prot-status { display: flex; gap: 12px; align-items: flex-start; margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: var(--bond-soft); }
+.prot-offer, .prot-status { align-items: center; }
+.prot-quote b, .prot-offer b { display: block; color: var(--bond); }
+.prot-quote small, .prot-offer small { display: block; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.prot-offer > span { flex: 1; }
+.prot-status > span:nth-child(2) { flex: 1; font-size: 14px; line-height: 1.45; }
+.prot-status.ok { background: var(--ok-soft); } .prot-status.bad { background: var(--err-soft); } .prot-status.held { background: var(--warn-soft); }
+.shield { font-size: 20px; line-height: 1; }
+.prot-note { color: var(--muted); }
+.trust .ti.bond-ti { background: var(--bond-soft); color: var(--bond); }
+
+.why-price { margin-top: 10px; border: 1px solid var(--line); border-radius: 14px; padding: 4px 14px; background: #fff; }
+.why-price summary { cursor: pointer; font-weight: 700; padding: 8px 0; color: var(--bond); }
+.why-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.why-row b { display: block; font-size: 15px; } .why-row small { display: block; color: var(--muted); font-size: 13px; line-height: 1.4; }
+.why-pct { font-weight: 800; white-space: nowrap; }
+.why-pct.up { color: var(--err); } .why-pct.down { color: var(--ok); }
+.why-row.total { border-top: 2px solid var(--ink); }
+.why-row.total .why-pct { font-size: 18px; }
+.rate-table .why-row:first-child { border-top: 0; }
+
+.prot-check { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0 0; padding: 12px 14px; border-radius: 14px; background: var(--bond-soft); }
+.prot-check input { margin-top: 4px; }
+.prot-check b { display: block; color: var(--bond); } .prot-check small { display: block; color: var(--muted); font-size: 14px; line-height: 1.45; }
+
+.rate-pill { margin-left: auto; background: var(--bond-soft); color: var(--bond); font-weight: 800; font-size: 13px; border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
+.bond-row { margin-top: 12px; flex-wrap: wrap; }
+.order.slim { padding: 14px; }
+.order.slim .art.mini { width: 64px; height: 64px; }
+
+/* QuickNode Streams: chain feed chips on the ledger */
+.lr-links { display: inline-flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.qn-chip { font-size: 12px; font-weight: 700; color: var(--muted); background: #F4F4F4; border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+.qn-chip.ok { color: var(--bond); background: var(--bond-soft); }
+.qn-line { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); margin: 0 0 14px; }
+.qn-line .live { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }

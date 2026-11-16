@@ -131,7 +131,7 @@ const usd = (n) => ethers.parseUnits(String(n), 18);
   const newbieHandle = (await newbie.session()).me.handle;
   await check("an unverified member can create a passport but not list", async () => {
     await newbie.call("/api/fund", { dollars: 5 });
-    const r = await newbie.tx({ action: "createPassport", name: "Silk scarf", brand: "Hermès", details: "90cm", icon: "other" });
+    const r = await newbie.tx({ action: "createPassport", name: "Silk scarf", brand: "Hermès", details: "90cm", icon: "other", category: "jewelry" });
     const st = await newbie.state();
     await newbie.tx({ action: "requestAuth", id: r.id, partner: st.partners[0].addr });
     await shop.tx({ action: "authenticate", id: r.id, note: "Checked" });
@@ -144,12 +144,12 @@ const usd = (n) => ethers.parseUnits(String(n), 18);
     const id = st.items.find((i) => i.name === "Silk scarf").id;
     await newbie.tx({ action: "list", id, price: "10" });
   });
-  await check("only a pawn shop can check IDs", () => expectError(maya.tx({ action: "verifyMember", member: newbieHandle }), "pawn shop"));
+  await check("only an authenticator can check IDs", () => expectError(maya.tx({ action: "verifyMember", member: newbieHandle }), "authenticator"));
 
   console.log("\nSale with a dispute decided by the panel");
   let itemId, did;
   await check("Maya lists a watch; Alex buys; Maya ships", async () => {
-    const r = await maya.tx({ action: "createPassport", name: "Dive watch", brand: "Seiko", details: "Box and papers", icon: "watch" });
+    const r = await maya.tx({ action: "createPassport", name: "Dive watch", brand: "Seiko", details: "Box and papers", icon: "watch", category: "watches" });
     itemId = r.id;
     const st = await maya.state();
     await maya.tx({ action: "requestAuth", id: itemId, partner: st.partners[0].addr });
@@ -220,7 +220,7 @@ const usd = (n) => ethers.parseUnits(String(n), 18);
   });
   await check("no invite reward when the inviter is also the seller (self-dealing)", async () => {
     const st = await maya.state();
-    const r = await maya.tx({ action: "createPassport", name: "Leather tote", brand: "Coach", details: "Tan", icon: "bag" });
+    const r = await maya.tx({ action: "createPassport", name: "Leather tote", brand: "Coach", details: "Tan", icon: "bag", category: "jewelry" });
     await maya.tx({ action: "requestAuth", id: r.id, partner: st.partners[0].addr });
     await shop.tx({ action: "authenticate", id: r.id, note: "ok" });
     await maya.tx({ action: "list", id: r.id, price: "1" });
@@ -243,6 +243,68 @@ const usd = (n) => ethers.parseUnits(String(n), 18);
     eq(Object.keys((await alex.state()).balances).length, 2, "own + treasury");
     ok(Object.keys((await admin.state()).balances).length > 10, "admin sees all");
   });
+  console.log("\nProtection: specialists, bonds, the pool, a covered sale and a fake");
+  const shop2 = person();
+  await shop2.call("/api/auth", { op: "demo", handle: "shop2" });
+  await check("a piece needs a category, and only a specialist in it can be asked", async () => {
+    await expectError(maya.tx({ action: "createPassport", name: "No category" }), "choose a category");
+    const r = await maya.tx({ action: "createPassport", name: "Saddle bag", brand: "Dior", details: "", icon: "bag", category: "handbags" });
+    const st = await maya.state();
+    await expectError(maya.tx({ action: "requestAuth", id: r.id, partner: st.partners[0].addr }), "isn't approved for this category");
+  });
+  await check("only authenticators stake bonds; only members fund the pool", async () => {
+    await expectError(maya.tx({ action: "stakeBond", amount: "1" }), "Only authenticators");
+    await expectError(shop.tx({ action: "poolDeposit", amount: "1" }), "Only members");
+    await shop.tx({ action: "stakeBond", amount: "3" });
+    await newbie.call("/api/fund", { dollars: 10 });
+    await newbie.tx({ action: "poolDeposit", amount: "2" });
+    const p = (await newbie.state()).protection;
+    eq(p.pool.assets, usd(2).toString(), "pool");
+    eq(p.members[newbieAddr.toLowerCase()].value, usd(2).toString(), "stake value");
+  });
+  let pid, cover;
+  await check("the specialist's stamp certifies the piece; the quote is priced from the records", async () => {
+    const r = await maya.tx({ action: "createPassport", name: "Field watch", brand: "Hamilton", details: "38mm", icon: "watch", category: "watches" });
+    pid = r.id;
+    const st = await maya.state();
+    await maya.tx({ action: "requestAuth", id: pid, partner: st.partners[0].addr });
+    await shop.tx({ action: "authenticate", id: pid, note: "Movement checked" });
+    await maya.tx({ action: "list", id: pid, price: "2" });
+    const p = (await maya.state()).protection;
+    eq(p.categoryOf[pid], "watches", "certified on-chain");
+    const q = p.quote[pid];
+    ok(q.available, "available");
+    // Maya: 2 completed sales (-0.5%) + 1 refund? no; her invitee Alex lost a dispute, but Maya has no inviter. Base 3%.
+    eq(q.base, 300, "watch base");
+    ok(q.feeBps === 300 + q.sellerAdj + q.inviterAdj + q.shopAdj || q.feeBps === 100, "fee is the sum of its parts");
+  });
+  await check("the buyer adds protection while the money is held; delivery starts the 90 days", async () => {
+    await newbie.tx({ action: "buy", id: pid });
+    await newbie.tx({ action: "buyCover", id: pid });
+    await expectError(newbie.tx({ action: "buyCover", id: pid }), "already protected");
+    let p = (await newbie.state()).protection;
+    cover = p.covers[p.covers.length - 1];
+    eq(cover.state, "pending", "pending until delivery");
+    await maya.tx({ action: "ship", id: pid });
+    await newbie.tx({ action: "confirm", id: pid });
+    p = (await newbie.state()).protection;
+    eq(p.covers.find((c) => c.id === cover.id).state, "active", "activated by the treasury after delivery");
+    ok((await newbie.state()).ledger.some((r) => r.action === "coverActivated"), "in the ledger");
+  });
+  await check("a claim: the stamping shop can't rule; a second specialist rules it fake and the buyer is refunded", async () => {
+    await newbie.tx({ action: "fileClaim", cover: cover.id, evidence: "The movement isn't a Hamilton" });
+    await expectError(shop.tx({ action: "decideClaim", cover: cover.id, fake: false, ruling: "fine" }), "second specialist");
+    const before = await bal(newbieAddr);
+    await shop2.tx({ action: "decideClaim", cover: cover.id, fake: true, ruling: "Clone movement. Fake." });
+    ok((await bal(newbieAddr)) - before === usd(2.1), "buyer gets price + 5% deposit back");
+    const p = (await newbie.state()).protection;
+    const mayaAddr = (await maya.session()).me.address.toLowerCase();
+    eq(p.covers.find((c) => c.id === cover.id).state, "paid", "paid");
+    eq(p.members[mayaAddr].fakesSold, 1, "seller's record");
+    eq(p.shops[st0shop(p)].fakesIn.watches, 1, "shop's record in watches");
+  });
+  function st0shop(p) { return Object.keys(p.shops).find((a) => p.shops[a].fakes > 0); }
+
   await check("sign out ends the session", async () => {
     await alex.call("/api/auth", { op: "sign-out" });
     eq((await alex.session()).me, null, "signed out");

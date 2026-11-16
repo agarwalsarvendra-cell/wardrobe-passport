@@ -11,8 +11,10 @@
  *     POST /api/fund     demo money from the platform treasury
  *     POST /api/admin    admin setup (demo accounts, seeded community)
  * - The contract (WardrobePassportV3 on Arc) holds the money and the rules:
- *   only invited members trade, only members whose ID a pawn shop checked can
- *   sell, and disputes are decided by a panel of members.
+ *   only invited members trade, only members whose ID an authenticator checked
+ *   can sell, and disputes are decided by a panel of members.
+ * - WardrobeProtection (when PROTECTION_ADDRESS is set) adds bonded
+ *   authentication and 90-day protection priced from the records.
  * - One membership, separate views: Sell, Buy, Community, Shop desk (pawn
  *   shops) and Admin. The admin can view the app as any member, read-only.
  * - #passport=<id> is a public, read-only passport page. #invite=<code> joins.
@@ -29,10 +31,13 @@
   const VIEWS = {
     sell: { label: "Sell", tabs: [["home", "Dashboard"], ["pieces", "My pieces"], ["sales", "Sales"]] },
     buy: { label: "Buy", tabs: [["shop", "Marketplace"], ["orders", "My orders"], ["mine", "My purchases"]] },
-    desk: { label: "Shop desk", tabs: [["front", "Front desk"], ["requests", "To verify"], ["sdisputes", "Disputes"], ["record", "Record"]] },
-    community: { label: "Community", tabs: [["ledger", "Ledger"], ["people", "Members"], ["disputes", "Disputes"], ["invite", "Invites & credits"]] },
-    admin: { label: "Admin", tabs: [["overview", "Overview"], ["side", "Side by side"], ["members", "Members"], ["setup", "Setup"]] },
+    desk: { label: "Shop desk", tabs: [["front", "Front desk"], ["requests", "To verify"], ["opinions", "Second opinions", "p"], ["bond", "Bond", "p"], ["sdisputes", "Disputes"], ["record", "Record"]] },
+    community: { label: "Community", tabs: [["ledger", "Ledger"], ["feed", "Chain feed", "s"], ["people", "Members"], ["protection", "Protection", "p"], ["disputes", "Disputes"], ["invite", "Invites & credits"]] },
+    admin: { label: "Admin", tabs: [["overview", "Overview"], ["side", "Side by side"], ["members", "Members"], ["specialists", "Specialists"], ["setup", "Setup"]] },
   };
+  // Tabs marked "p" exist only when the protection contract is set.
+  // Tabs marked "s" appear once the QuickNode Streams feed has delivered events.
+  const tabsOf = (v) => VIEWS[v].tabs.filter((t) => (t[2] !== "p" || !!state.protection) && (t[2] !== "s" || !!state.streamStatus));
   const LS = { view: "wp.view", tab: "wp.tab." };
   const SHIP_DAYS = 5;
   const CONFIRM_DAYS = 7;
@@ -49,7 +54,7 @@
     me: null, isAdmin: false, adminAddress: null, directory: [], demo: [], seeded: [],
     viewAs: null, view: null, tab: null,
     admin: null, items: [], histories: {}, partners: [], members: {}, disputes: [], records: {},
-    balances: {}, authRequests: {}, flags: {}, ledger: [],
+    balances: {}, authRequests: {}, flags: {}, ledger: [], protection: null, categories: {}, streamed: {}, streamStatus: null, chainFeed: [],
     loaded: false, online: true, busy: false, fatal: null,
     openItemId: null, publicId: null, inviteCode: null, invite: null,
     signin: { email: "", sent: false, demoCode: null },
@@ -110,6 +115,30 @@
   const disputeOf = (item) => state.disputes.find((d) => d.id === item.disputeId) || null;
   const openDisputes = () => state.disputes.filter((d) => !d.resolved);
 
+  // -------------------------------------------------------------- protection
+  const prot = () => state.protection;
+  const lc = (a) => (a || "").toLowerCase();
+  const catName = (k) => (CFG.categories || []).find((c) => c.key === k)?.name || prot()?.categories?.find((c) => c.key === k)?.name || "";
+  /** The category a piece was certified in (on-chain), or the one it was added under. */
+  const catOf = (item) => prot()?.categoryOf?.[item.id] || state.categories[item.id] || null;
+  const certified = (item) => !!prot()?.categoryOf?.[item.id];
+  const specIn = (addr, cat) => prot()?.specialists?.[lc(addr)]?.[cat] || null;
+  const specialtiesOf = (addr) => Object.keys(prot()?.specialists?.[lc(addr)] || {});
+  const shopStatsOf = (addr) => prot()?.shops?.[lc(addr)] || null;
+  const quoteOf = (item) => {
+    const q = prot()?.quote?.[item.id];
+    return q ? { ...q, fee: BigInt(q.fee) } : null;
+  };
+  const coversOf = (item) => (prot()?.covers || []).filter((c) => c.itemId === item.id);
+  /** The cover on the current (or last) sale of a piece to this buyer. */
+  const coverFor = (item, buyer) => coversOf(item).filter((c) => same(c.buyer, buyer)).sort((a, b) => b.id - a.id)[0] || null;
+  const bondBacked = (item) => item.status === STATUS.LISTED && !!quoteOf(item)?.available;
+  const COVER_DAYS = 90;
+  const CLAIM_DEPOSIT_BPS = 500n;
+  const pctTxt = (bps) => `${(bps / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}%`;
+  const signedPct = (bps) => `${bps > 0 ? "+" : bps < 0 ? "−" : ""}${pctTxt(Math.abs(bps))}`;
+  const memberProt = (addr) => prot()?.members?.[lc(addr)] || null;
+
   function verified(item) {
     if (isZero(item.authBy)) return false;
     const h = state.histories[item.id] || [];
@@ -136,11 +165,11 @@
   const avatar = (name, key, cls = "avatar") => `<span class="${cls}" style="background:${colorOf(key || name)}">${esc((name || "?")[0])}</span>`;
 
   function levelOf(addr) {
-    if (partnerOf(addr)) return { key: "partner", label: "Partner pawn shop" };
+    if (partnerOf(addr)) return { key: "partner", label: "Partner authenticator" };
     const m = memberOf(addr);
     if (!m) return { key: "none", label: "Not on-chain yet" };
     if (!m.active) return { key: "suspended", label: "Suspended" };
-    return m.verifiedBy ? { key: "verified", label: "Verified member" } : { key: "member", label: "Member · ID not checked yet" };
+    return m.verifiedBy ? { key: "verified", label: "Verified member" } : { key: "member", label: "Member, ID not checked yet" };
   }
 
   function photoSrc(u) {
@@ -168,6 +197,7 @@
     shoes: { label: "Shoes", tint: "#e7efe9", svg: '<path d="M6 44V34c0-4 3-6 6-6h10l8-8 8 2c2 8 8 12 16 14 4 1 6 4 6 8z"/><path d="M6 44h54v6H6z"/><path d="M28 26l4 4M32 23l4 4"/>' },
     bag: { label: "Bag", tint: "#f1e6da", svg: '<path d="M12 24h40l-4 34H16z"/><path d="M22 24c0-12 20-12 20 0"/><path d="M28 34h8"/>' },
     watch: { label: "Watch", tint: "#e9e6f2", svg: '<path d="M24 18V4h16v14M24 46v14h16V46"/><circle cx="32" cy="32" r="14"/><path d="M32 32v-8M32 32l6 3M46 30h3v4h-3"/>' },
+    ring: { label: "Jewelry", tint: "#f2ead8", svg: '<circle cx="32" cy="40" r="16"/><path d="M24 14h16l-8 10z"/><path d="M24 14l8 10 8-10"/>' },
     other: { label: "Other", tint: "#efe9df", svg: '<path d="M28 14c0-5 8-5 8 0 0 3-4 4-4 8"/><path d="M32 22 6 44h52z"/>' },
   };
   function iconKey(imageUrl) {
@@ -183,10 +213,10 @@
   }
 
   const SAMPLES = [
-    { name: "Navy wool blazer", brand: "Hugo Boss", details: "Size 40R, worn twice", kind: "jacket" },
-    { name: "Steel dive watch", brand: "Seiko", details: "Box and papers, serviced 2025", kind: "watch" },
-    { name: "Leather tote", brand: "Coach", details: "Tan, like new", kind: "bag" },
-    { name: "White leather sneakers", brand: "Common Projects", details: "US 9, light wear", kind: "shoes" },
+    { name: "Steel dive watch", brand: "Seiko", details: "SKX007, box and papers", kind: "watch", category: "watches" },
+    { name: "Constellation (1966)", brand: "Omega", details: "Pie-pan dial, calibre 561", kind: "watch", category: "vintage-watches" },
+    { name: "Diamond stud earrings", brand: "Blue Nile", details: "0.5 ct total, with report", kind: "ring", category: "jewelry" },
+    { name: "Gold signet ring", brand: "Mejuri", details: "14k, size 7", kind: "ring", category: "jewelry" },
   ];
 
   // ------------------------------------------------------------- API access
@@ -226,7 +256,7 @@
     if (!list.length) { state.view = null; state.tab = null; return; }
     const saved = restore ? lsGet(LS.view) : null;
     if (!list.includes(state.view)) state.view = list.includes(saved) ? saved : list[0];
-    const tabs = VIEWS[state.view].tabs;
+    const tabs = tabsOf(state.view);
     const savedTab = restore ? lsGet(LS.tab + state.view) : null;
     if (!tabs.some(([id]) => id === state.tab)) state.tab = tabs.some(([id]) => id === savedTab) ? savedTab : tabs[0][0];
   }
@@ -237,7 +267,7 @@
     render();
   }
   const goTab = (tab) => {
-    const owner = Object.keys(VIEWS).find((k) => VIEWS[k].tabs.some(([id]) => id === tab));
+    const owner = Object.keys(VIEWS).find((k) => tabsOf(k).some(([id]) => id === tab));
     if (owner && owner !== state.view && viewsFor().includes(owner)) state.view = owner;
     state.tab = tab; lsSet(LS.view, state.view); lsSet(LS.tab + state.view, tab); render();
   };
@@ -261,6 +291,11 @@
       state.authRequests = d.authRequests || {};
       state.flags = d.flags || {};
       state.ledger = d.ledger || [];
+      state.protection = d.protection || null;
+      state.categories = d.categories || {};
+      state.streamed = d.streamed || {};
+      state.streamStatus = d.streamStatus || null;
+      state.chainFeed = d.chainFeed || [];
       state.loaded = true;
       state.online = true;
     } catch (e) {
@@ -311,6 +346,14 @@
     flag: (id, reason) => ({ action: "flag", id, reason }),
     unflag: (id) => ({ action: "unflag", id }),
     clearFlags: (id) => ({ action: "clearFlags", id }),
+    createPassportIn: (name, brand, details, photo, icon, category) => ({ action: "createPassport", name, brand, details, photo, icon, category }),
+    buyCover: (id) => ({ action: "buyCover", id }),
+    fileClaim: (cover, evidence) => ({ action: "fileClaim", cover, evidence }),
+    decideClaim: (cover, fake, ruling) => ({ action: "decideClaim", cover, fake, ruling }),
+    stakeBond: (amount) => ({ action: "stakeBond", amount }),
+    withdrawBond: (amount) => ({ action: "withdrawBond", amount }),
+    poolDeposit: (amount) => ({ action: "poolDeposit", amount }),
+    poolWithdraw: (amount) => ({ action: "poolWithdraw", amount }),
   };
 
   const GENERIC = "Something went wrong. Please try again.";
@@ -412,12 +455,13 @@
     return `
       <button class="lcard" data-open="${item.id}" aria-label="Open ${esc(item.name)}">
         <div class="lcard-img">${art(item)}
-          ${verified(item) ? `<span class="lbadge">✓ Verified</span>` : ""}
+          ${bondBacked(item) ? `<span class="lbadge bond" title="${esc(nameOf(item.authBy))} has money staked behind this stamp">✓ Bond-backed</span>` : verified(item) ? `<span class="lbadge">✓ Verified</span>` : ""}
           ${item.status === STATUS.DISPUTED ? `<span class="lbadge warn">In dispute</span>` : sold ? `<span class="lbadge muted">Sold</span>` : ""}
         </div>
         <div class="lcard-row"><b>${esc(item.name)}</b>${price ? `<span>${price}</span>` : ""}</div>
         <div class="lcard-sub">${esc(item.brand || "No brand")}${item.details ? `, ${esc(item.details)}` : ""}</div>
-        ${shop ? `<div class="lcard-sub">Checked by ${esc(shop.name)}</div>` : ""}
+        ${shop ? `<div class="lcard-sub">Checked by ${esc(shop.name)}${catOf(item) ? ` · ${esc(catName(catOf(item)))}` : ""}</div>` : ""}
+        ${item.status === STATUS.LISTED && quoteOf(item)?.available ? `<div class="lcard-sub prot-line">90-day protection ${usd(quoteOf(item).fee)}</div>` : ""}
         ${footer === "" ? "" : `<div class="lcard-foot">${footer ?? chipFor(item)}</div>`}
       </button>`;
   }
@@ -458,7 +502,7 @@
     const el = $("#viewbar");
     const list = viewsFor();
     if (!signedIn() || !state.loaded || state.publicId || state.inviteCode || !list.length) { el.innerHTML = ""; return; }
-    const badge = { community: myPanelDuty().length, desk: myRequests().length + myShopDisputes().length + unverifiedMembers().length, sell: mineSelling().filter((i) => i.status === STATUS.PAID).length, buy: 0, admin: 0 };
+    const badge = { community: myPanelDuty().length, desk: myRequests().length + myShopDisputes().length + unverifiedMembers().length + secondOpinions().length, sell: mineSelling().filter((i) => i.status === STATUS.PAID).length, buy: 0, admin: 0 };
     let html = `<div class="viewbar-inner">${list.map((v) => `<button class="vbtn ${state.view === v ? "active" : ""}" data-view="${v}">${VIEWS[v].label}${badge[v] ? `<span class="count">${badge[v]}</span>` : ""}</button>`).join("")}</div>`;
     if (state.isAdmin && state.viewAs) {
       const v = viewer();
@@ -469,34 +513,36 @@
 
   function renderTabs() {
     const nav = $("#tabs");
-    if (!state.view || !state.loaded || state.publicId || state.inviteCode) { nav.innerHTML = ""; return; }
+    if (!state.view || !state.loaded || state.publicId || state.inviteCode) { nav.innerHTML = ""; nav.dataset.sig = ""; return; }
     const counts = {
       sales: mineSelling().length, orders: mineBuying().length, requests: myRequests().length,
-      sdisputes: myShopDisputes().length, disputes: myPanelDuty().length, front: unverifiedMembers().length + flaggedListings().length,
+      sdisputes: myShopDisputes().length, disputes: myPanelDuty().length, front: unverifiedMembers().length + flaggedListings().length, opinions: secondOpinions().length,
     };
-    nav.innerHTML = VIEWS[state.view].tabs.map(([id, label]) =>
+    const html = tabsOf(state.view).map(([id, label]) =>
       `<button role="tab" data-tab="${id}" class="tab ${state.tab === id ? "active" : ""}" aria-selected="${state.tab === id}">${label}${counts[id] ? `<span class="count">${counts[id]}</span>` : ""}</button>`).join("");
+    if (nav.dataset.sig !== html) { nav.innerHTML = html; nav.dataset.sig = html; }
   }
 
   function moneyTip() {
     if (readOnly() || myBalance() > 0n) return "";
     return `<p class="tip boxed">No test dollars yet. <button class="linkish" data-action="add-money">Add money</button></p>`;
   }
-  const STEPS = ["Join by invitation", "ID checked at a pawn shop", "Pawn shop authenticates the piece", "Buyer pays, money is held", "Ship, then confirm or dispute", "A panel of members decides disputes"];
+  const STEPS = ["Join by invitation", "ID checked by an authenticator", "A specialist authenticates the piece", "Buyer pays, money is held", "Ship, then confirm or dispute", "A panel of members decides disputes"];
   const stepsHtml = () => `<ol class="steps">${STEPS.map((t, i) => `<li><span>${i + 1}</span>${t}</li>`).join("")}<li class="how-link"><button class="linkish" data-action="how">How it works on Arc</button></li></ol>`;
 
   // ------------------------------------------------------------ marketplace
-  const CATS = [["all", "All"], ["jacket", "Jackets"], ["top", "Tops"], ["dress", "Dresses"], ["trousers", "Trousers"], ["shoes", "Shoes"], ["bag", "Bags"], ["watch", "Watches"], ["other", "Accessories"]];
+  const CATS = [["all", "All", null], ["watches", "Watches", "watch"], ["vintage-watches", "Vintage watches", "watch"], ["jewelry", "Jewelry", "ring"], ["handbags", "Handbags", "bag"]];
+  const ICON_CAT = { watch: "watches", ring: "jewelry", bag: "handbags" };
   const GRID_ICON = '<rect x="10" y="10" width="18" height="18" rx="4"/><rect x="36" y="10" width="18" height="18" rx="4"/><rect x="10" y="36" width="18" height="18" rx="4"/><rect x="36" y="36" width="18" height="18" rx="4"/>';
   const matches = (i) => {
-    if (state.cat !== "all" && iconKey(i.imageUrl) !== state.cat) return false;
+    if (state.cat !== "all" && (catOf(i) || ICON_CAT[iconKey(i.imageUrl)]) !== state.cat) return false;
     const q = state.q.trim().toLowerCase();
     return !q || `${i.name} ${i.brand} ${i.details}`.toLowerCase().includes(q);
   };
   function chipsHtml() {
-    return `<div class="cats" aria-label="Categories">${CATS.map(([k, label]) => `
+    return `<div class="cats" aria-label="Categories">${CATS.map(([k, label, ic]) => `
       <button class="cat ${state.cat === k ? "on" : ""}" data-cat="${k}" aria-pressed="${state.cat === k}">
-        <svg viewBox="0 0 64 64" aria-hidden="true">${k === "all" ? GRID_ICON : ICONS[k].svg}</svg><span>${label}</span></button>`).join("")}</div>`;
+        <svg viewBox="0 0 64 64" aria-hidden="true">${ic ? ICONS[ic].svg : GRID_ICON}</svg><span>${label}</span></button>`).join("")}</div>`;
   }
   function renderSearch() {
     const el = $("#search");
@@ -519,8 +565,8 @@
     el.innerHTML = `
       <section class="why" aria-labelledby="why-h">
         <div class="why-copy">
-          <h2 id="why-h">Pre-owned fashion from people you can vouch for</h2>
-          <p>Every member's ID and every piece is checked in person. Your money is held until the piece arrives.</p>
+          <h2 id="why-h">Pre-owned watches and jewelry, checked by specialists who stake their own money</h2>
+          <p>Every member's ID and every piece is checked in person. Your money is held until it arrives, and 90-day protection is priced from everyone's record.</p>
           <div class="row why-cta"><a class="btn gold" href="#browse" data-scroll="browse">Browse pieces</a><button class="btn ghost" data-action="open-signin">Sign in</button></div>
           <p class="why-hint">Drag the passport to spin it. Hover a badge to see what you get.</p>
         </div>
@@ -540,13 +586,14 @@
     return `
       <div class="intro" id="browse">
         <div><h2>Browse pieces</h2></div>
-        <div class="intro-facts"><span><b>${s.members}</b> members</span><span><b>${s.sales}</b> sales</span><span><b>${s.disputes}</b> ${s.disputes === 1 ? "dispute" : "disputes"} decided</span></div>
+        <div class="intro-facts"><span><b>${s.members}</b> members</span><span><b>${s.sales}</b> sales</span><span><b>${s.disputes}</b> ${s.disputes === 1 ? "dispute" : "disputes"} decided</span>${prot() ? `<span><b>${usd(totalBonds() + BigInt(prot().pool.assets))}</b> staked behind stamps and protection</span>` : ""}</div>
       </div>
       ${chipsHtml()}
       ${live.length ? `<div class="lgrid">${live.map((i) => card(i, "")).join("")}</div>`
         : `<div class="empty slim"><p>${filtering ? "Nothing matches. Try another category or search." : "Nothing for sale yet."}</p></div>`}
       ${sold.length ? `<h3 class="grid-h">Recently sold</h3><div class="lgrid">${sold.map((i) => card(i, "")).join("")}</div>` : ""}
       ${communityHtml()}
+      ${protectionPitchHtml()}
       ${explainHtml()}`;
   }
 
@@ -554,12 +601,12 @@
   function communityHtml() {
     const people = [...state.demo.filter((d) => d.handle !== "shop"), ...state.seeded];
     if (!people.length) return "";
-    const shop = state.partners[0];
+    const shops = state.partners.filter((p) => p.active);
     return `
       <section class="community" aria-labelledby="community-h">
         <div class="community-head">
           <div><h2 id="community-h">Meet the community</h2><p>Every member joined by invitation and had their ID checked in person. Tap anyone to try the app as them.</p></div>
-          ${shop ? `<div class="shop-card"><span class="avatar">${esc(shop.name[0])}</span><span><b>${esc(shop.name)}</b><small>${esc(shop.city)} · partner pawn shop · ${shop.membersVerified} IDs checked</small></span></div>` : ""}
+          <div class="shop-cards">${shops.map((p) => `<button class="shop-card" data-demo="${esc(dirByAddr(p.addr)?.handle || "")}" ${dirByAddr(p.addr) ? "" : "disabled"}><span class="avatar">${esc(p.name[0])}</span><span><b>${esc(p.name)}</b><small>${esc(p.city)} · ${specialtiesOf(p.addr).length ? esc(specialtiesOf(p.addr).map(catName).join(", ")) : "authenticator"}${shopStatsOf(p.addr) ? ` · ${usd(BigInt(shopStatsOf(p.addr).bond))} bond` : ""}</small></span></button>`).join("")}</div>
         </div>
         <div class="people-grid">${people.map((u) => `
           <button class="person-card" data-demo="${esc(u.handle)}" aria-label="Try the app as ${esc(u.name)}">
@@ -570,13 +617,34 @@
       </section>`;
   }
 
+  const totalBonds = () => Object.values(prot()?.shops || {}).reduce((s, x) => s + BigInt(x.bond), 0n);
+  // The new part of the pitch: authenticators back their stamp with money, and protection is priced from the records.
+  function protectionPitchHtml() {
+    const p = prot();
+    if (!p) return "";
+    const covers = p.covers.length, paid = p.covers.filter((c) => c.state === "paid").length;
+    return `
+      <section class="pitch" aria-labelledby="pitch-h">
+        <div class="pitch-copy">
+          <h2 id="pitch-h">When an authenticator is wrong, it pays</h2>
+          <p>Each authenticator stakes a bond behind its stamp. Buyers can add 90 days of protection after delivery, priced from the seller's record, the record of whoever invited them, and the authenticator's record in that category. If a second specialist finds the piece is fake, the bond pays first and a pool funded by members pays the rest.</p>
+        </div>
+        <div class="pitch-facts">
+          <div><b>${usd(totalBonds())}</b><small>staked by ${plural(Object.keys(p.shops).length, "authenticator", "authenticators")}</small></div>
+          <div><b>${usd(BigInt(p.pool.assets))}</b><small>in the members' pool</small></div>
+          <div><b>${covers}</b><small>${covers === 1 ? "purchase" : "purchases"} protected</small></div>
+          <div><b>${usd(BigInt(p.pool.paid))}</b><small>paid out on ${plural(paid, "fake", "fakes")}</small></div>
+        </div>
+      </section>`;
+  }
+
   function explainHtml() {
     return `
       <section class="explain" aria-labelledby="explain-h">
         <h2 id="explain-h">How it works</h2>
         <div class="promises">
           <div><span class="pi"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg></span><h3>Members are vouched for</h3><p>Invite-only. IDs checked in person.</p></div>
-          <div><span class="pi"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span><h3>Every piece is checked</h3><p>A pawn shop authenticates it first.</p></div>
+          <div><span class="pi"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span><h3>Every piece is checked</h3><p>A specialist in its category authenticates it first.</p></div>
           <div><span class="pi"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><h3>Your money is safe</h3><p>Held until you confirm delivery.</p></div>
           <div><span class="pi"><svg viewBox="0 0 24 24"><path d="M12 4v16M5 8h14M7 8l-3 6h6zM17 8l-3 6h6z"/></svg></span><h3>Disputes are fair</h3><p>Five random members vote.</p></div>
         </div>
@@ -600,7 +668,7 @@
       ${state.demo.length ? `
       <div class="or"><span>or try the demo</span></div>
       <div class="demo-list">${state.demo.map((d) => `
-        <button class="demo-row" data-demo="${d.handle}">${avatar(d.name, d.handle)}<span><b>${esc(d.name)}</b><small>${d.handle === "maya" ? "Seller" : d.handle === "alex" ? "Buyer" : "Pawn shop"}</small></span><span class="go">Continue</span></button>`).join("")}</div>
+        <button class="demo-row" data-demo="${d.handle}">${avatar(d.name, d.handle)}<span><b>${esc(d.name)}</b><small>${esc(d.label)}</small></span><span class="go">Continue</span></button>`).join("")}</div>
       ${state.seeded.length ? `<p class="fine">Vote on disputes as a member: ${state.seeded.map((u) => `<button class="chip owned seed-chip" data-demo="${esc(u.handle)}">${esc(u.name)}</button>`).join(" ")}</p>` : ""}` : ""}
       <p class="fine center"><button class="linkish" data-action="admin-signin">Platform admin: sign in with MetaMask</button></p>
     `, (m) => { m.classList.add("narrow"); ($("#si-code", m) || $("#si-email", m))?.focus(); });
@@ -616,7 +684,7 @@
         <div class="panel">
           <span class="role-kicker">You're invited</span>
           <h2 class="join-title">${esc(inv.inviterName)} invited you to Wardrobe Passport</h2>
-          <p>A closed resale community. Every piece is authenticated in person, payment is held until it arrives, and members decide disputes together. ${esc(inv.inviterName)}'s name will be linked to your membership on Arc.</p>
+          <p>A closed resale community for watches and jewelry. Every piece is authenticated in person by a specialist, payment is held until it arrives, and members decide disputes together. ${esc(inv.inviterName)}'s name will be linked to your membership on Arc, and your record affects the protection price on what they sell.</p>
           <form id="join-form" novalidate>
             <div class="field"><label for="j-name">Your name</label><input id="j-name" type="text" maxlength="40" placeholder="e.g. Priya Shah" required></div>
             <div class="field"><label for="j-email">Email</label><input id="j-email" type="email" maxlength="120" placeholder="you@example.com" required><span class="hint">You'll use it to sign in. We never show it to other members.</span></div>
@@ -626,7 +694,7 @@
           <ul class="plain fine">
             <li>You get a Circle wallet on Arc, with no keys to look after.</li>
             <li>As a new member you can buy right away, up to $50 per item.</li>
-            <li>To sell, show your member code and a photo ID at a partner pawn shop.</li>
+            <li>To sell, show your member code and a photo ID at a partner authenticator.</li>
             <li>Welcome gift: your first delivery is free.</li>
           </ul>
         </div>
@@ -635,8 +703,8 @@
 
   // ------------------------------------------------------------------ seller
   const NEXT = {
-    none: "Ask a pawn shop to authenticate it",
-    declined: "Not verified. Ask again or choose another pawn shop",
+    none: "Ask a specialist to authenticate it",
+    declined: "Not verified. Ask again or choose another authenticator",
     verified: "Verified. Set a price and list it",
   };
   function memberCard(u) {
@@ -646,9 +714,43 @@
         <div>
           <span class="role-kicker">Member code</span>
           <div class="mc-code mono-inline">${esc(u.handle)}</div>
-          <p class="fine">Show this and a photo ID at a partner pawn shop. They check it's you and record it on Arc.</p>
+          <p class="fine">Show this and a photo ID at a partner authenticator. They check it's you and record it on Arc.</p>
         </div>
       </div>`;
+  }
+
+  /** The parts of a protection price, in plain words. */
+  function rateWords(r, item) {
+    const out = [];
+    const cat = item ? catName(catOf(item)) : "Watches";
+    out.push(`${cat || "Category"} base ${pctTxt(r.base)}`);
+    if (r.sellerAdj) out.push(`${r.sellerAdj > 0 ? "seller's record" : "seller's clean sales"} ${signedPct(r.sellerAdj)}`);
+    if (r.inviterAdj) out.push(`invited by a member whose invitees lost disputes ${signedPct(r.inviterAdj)}`);
+    if (r.shopAdj) out.push(`${r.shopAdj > 0 ? "authenticator's fakes in this category" : "authenticator's clean record"} ${signedPct(r.shopAdj)}`);
+    return out;
+  }
+  /** "Why this price?": each part of the fee, with the record behind it. */
+  function whyPriceHtml(item, q) {
+    const r = recOf(item.owner);
+    const mp = memberProt(item.owner) || {};
+    const ss = shopStatsOf(item.authBy);
+    const inviter = memberOf(item.owner)?.invitedBy;
+    const row = (label, bps, why) => `<div class="why-row"><span><b>${label}</b><small>${why}</small></span><span class="why-pct ${bps > 0 ? "up" : bps < 0 ? "down" : ""}">${bps ? signedPct(bps) : "0%"}</span></div>`;
+    const sellerWhy = [r.sold ? `${plural(r.sold, "completed sale", "completed sales")} (−0.25% each, up to −1.5%)` : "No completed sales yet (+2%)",
+      r.disputesLost ? `${plural(r.disputesLost, "dispute lost", "disputes lost")} (+3% each)` : "", r.refundsGiven ? `${plural(r.refundsGiven, "refund", "refunds")} (+1% each)` : "",
+      mp.fakesSold ? `${plural(mp.fakesSold, "fake", "fakes")} proven (+5% each)` : ""].filter(Boolean).join(" · ");
+    const invRec = inviter ? recOf(inviter) : null;
+    const fakesHere = ss?.fakesIn?.[q.category] || 0;
+    const shopWhy = fakesHere ? `${plural(fakesHere, "fake", "fakes")} stamped in ${catName(q.category).toLowerCase()} (+4% each)` : q.shopAdj < 0 ? "10+ stamps and no fakes anywhere (−0.5%)" : "No fakes in this category";
+    return `
+      <details class="why-price"><summary>Why this price?</summary>
+        ${row(`${catName(q.category)} base rate`, q.base, "Set per category. Vintage pieces are harder to judge.")}
+        ${row(`Seller: ${esc(nameOf(item.owner))}`, q.sellerAdj, sellerWhy)}
+        ${row(`Invited by ${inviter ? esc(nameOf(inviter)) : "no one"}`, q.inviterAdj, inviter ? (invRec.inviteesDisputesLost ? `People they invited lost ${plural(invRec.inviteesDisputesLost, "dispute", "disputes")} (+1% each, up to +3%)` : "People they invited have a clean record") : "Founding member")}
+        ${row(`Authenticator: ${esc(nameOf(item.authBy))}`, q.shopAdj, shopWhy)}
+        <div class="why-row total"><span><b>Your price</b><small>${pctTxt(q.feeBps)} of ${usd(item.price)}, kept between 1% and 20%</small></span><span class="why-pct">${usd(q.fee)}</span></div>
+        <p class="fine">Calculated on Arc by the protection contract from records nobody can edit.</p>
+      </details>`;
   }
 
   function renderSellerHome() {
@@ -670,22 +772,24 @@
       </div>
       ${moneyTip()}`;
     if (!canSell) {
-      html += `<div class="callout held"><strong>Get your ID checked to start selling.</strong> Show this code and a photo ID at ${activePartners()[0] ? esc(activePartners()[0].name) : "a partner pawn shop"}.</div>${memberCard(v)}`;
+      html += `<div class="callout held"><strong>Get your ID checked to start selling.</strong> Show this code and a photo ID at ${activePartners()[0] ? esc(activePartners()[0].name) : "a partner authenticator"}.</div>${memberCard(v)}`;
     }
-    html += tiles([[mine.length, "pieces"], [waiting.length, "waiting for a pawn shop"], [listed.length, "for sale"], [toShip.length, "to ship"], [usd(earned), "earned from sales"]]);
+    const myRate = memberProt(myAddr())?.rate;
+    html += tiles([[mine.length, "pieces"], [waiting.length, "waiting for an authenticator"], [listed.length, "for sale"], [toShip.length, "to ship"], [usd(earned), "earned from sales"], ...(myRate ? [[pctTxt(myRate.feeBps), "protection rate on your watches"]] : [])]);
+    if (myRate) html += `<p class="fine">Buyers can protect what you sell for 90 days. Their price starts from your record: ${rateWords(myRate).join(", ")}. Clean sales bring it down.</p>`;
 
     const todo = [];
     for (const i of owned) { const st = authStage(i); if (NEXT[st]) todo.push([i, st === "verified" && !canSell ? "Verified. Get your ID checked to list it" : NEXT[st], st === "verified" ? "List it" : "Request"]); }
     for (const i of toShip) todo.push([i, `${nameOf(i.buyer)} paid ${usd(i.price)}. Ship it and mark it as shipped`, "Ship"]);
     for (const i of mine.filter((x) => x.status === STATUS.SHIPPED && now() >= x.shippedAt + CONFIRM_DAYS * 86400)) todo.push([i, "The buyer didn't respond. You can collect the payment", "Collect"]);
     for (const i of mine.filter((x) => x.status === STATUS.DISPUTED)) todo.push([i, "Dispute open. A panel of members is voting", "View"]);
-    for (const i of listed.filter(paused)) todo.push([i, "Paused: members flagged this listing. The pawn shop will review it", "View"]);
+    for (const i of listed.filter(paused)) todo.push([i, "Paused: members flagged this listing. The authenticator will review it", "View"]);
 
     html += `<div class="h-label">What to do next</div>`;
     if (!mine.length) {
       html += `<div class="empty"><h3>Start with your first piece</h3><p>Add a piece and it gets a digital passport: a photo, who owned it, when, and for how much.</p><button class="btn gold" data-action="add-item" ${dis}>Add your first piece</button></div>`;
     } else if (!todo.length) {
-      html += `<div class="empty slim"><p>Nothing needs you right now${waiting.length ? ". A pawn shop is checking your piece" : listed.length ? ". Your listing is live in the marketplace" : ""}.</p></div>`;
+      html += `<div class="empty slim"><p>Nothing needs you right now${waiting.length ? ". An authenticator is checking your piece" : listed.length ? ". Your listing is live in the marketplace" : ""}.</p></div>`;
     } else {
       html += `<div class="done-list">` + todo.map(([i, line, cta]) => `
         <button class="done" data-open="${i.id}">${art(i, "mini")}<span><strong>${esc(i.name)}</strong><small>${esc(line)}</small></span><span class="done-cta">${cta}</span></button>`).join("") + `</div>`;
@@ -709,16 +813,50 @@
   function renderShop() {
     const forSale = listedNow().filter((i) => !same(i.owner, myAddr())).filter(matches).reverse();
     const capNote = !isVerified(myAddr()) && !readOnly() ? `<p class="tip boxed">You can buy pieces up to $50 until your ID is checked.</p>` : "";
-    return `${moneyTip()}${capNote}${chipsHtml()}
+    const pnote = prot() ? `<p class="fine">Pieces marked “Bond-backed” can be protected for 90 days after delivery. Open one to see its price and why.</p>` : "";
+    return `${moneyTip()}${capNote}${chipsHtml()}${pnote}
       ${forSale.length ? `<div class="lgrid">${forSale.map((i) => card(i, "")).join("")}</div>`
         : `<div class="empty slim"><p>${state.q || state.cat !== "all" ? "Nothing matches. Try another category or search." : "Nothing for sale right now."}</p></div>`}`;
+  }
+
+  /** Protection on a buyer's purchase: status, days left and what they can do. */
+  function coverBlock(item, buyer = myAddr()) {
+    if (!prot()) return "";
+    const dis = state.busy || readOnly() ? "disabled" : "";
+    const c = coverFor(item, buyer);
+    const inSale = [STATUS.PAID, STATUS.SHIPPED].includes(item.status) && same(item.buyer, buyer);
+    if (!c || (inSale && c.paidAt !== item.paidAt)) {
+      if (!inSale) return "";
+      const q = quoteOf(item);
+      if (!q) return "";
+      if (!q.available) return `<p class="fine prot-note">${certified(item) ? "Protection isn't available on this piece right now: the authenticator's bond or the pool is too small." : "This piece wasn't certified by a specialist, so it can't be protected."}</p>`;
+      return `<div class="prot-offer"><span><b>Add 90-day protection: ${usd(q.fee)}</b><small>${pctTxt(q.feeBps)} of the price. Covers you for 90 days after delivery if a second specialist finds it's fake.</small></span><button class="btn gold small" data-action="buy-cover" data-id="${item.id}" ${dis}>Add protection</button></div>`;
+    }
+    const fee = usd(BigInt(c.fee));
+    const ends = c.deliveredAt + COVER_DAYS * 86400;
+    const left = Math.max(0, Math.ceil((ends - now()) / 86400));
+    const canClaim = c.state === "active" && left > 0 && same(item.owner, buyer) && item.status === STATUS.OWNED;
+    const line = {
+      pending: `Protected (${fee}). The 90 days start when you confirm delivery.`,
+      active: left > 0 ? `Protected for ${plural(left, "more day", "more days")}, until ${fmtDate(ends)}. Covers the full ${usd(BigInt(c.amount))}.` : "Protection has ended.",
+      claimed: `Claim filed ${fmtDate(c.claimedAt)}. A second specialist in ${esc(catName(c.category).toLowerCase())} is re-inspecting it.`,
+      paid: `Proven fake. You got ${usd(BigInt(c.amount) + BigInt(c.claimDeposit))} back: ${esc(nameOf(c.shop))}'s bond paid half, the members' pool paid half.${c.ruling ? ` “${esc(c.ruling)}”` : ""}`,
+      rejected: `Claim rejected by ${esc(nameOf(c.reviewer))}: “${esc(c.ruling)}”`,
+      expired: "Protection ended after 90 days with no claim.",
+      void: `The sale didn't complete, so the ${fee} fee was refunded.`,
+    }[c.state];
+    const cls = c.state === "paid" ? "ok" : c.state === "rejected" ? "bad" : c.state === "claimed" ? "held" : "info";
+    return `<div class="prot-status ${cls}"><span class="shield" aria-hidden="true">🛡</span><span>${line}</span>${canClaim ? `<button class="btn danger small" data-action="claim-fake" data-cover="${c.id}" ${dis}>This is a fake</button>` : ""}</div>`;
   }
 
   function renderMine() {
     const mine = state.items.filter((i) => same(i.owner, myAddr()) && i.status === STATUS.OWNED).reverse();
     const head = `<div class="section-head"><div><h2>My purchases</h2><p>Pieces you own, each with its passport · ${esc(recText(myAddr()))}</p></div></div>`;
     if (!mine.length) return head + `<div class="empty"><h3>Nothing here yet</h3><p>When a piece arrives and you confirm it, its passport moves to you and it shows here.</p><button class="btn ghost" data-tab-go="shop">Browse the marketplace</button></div>`;
-    return head + `<div class="grid">${mine.map((i) => card(i)).join("")}</div>`;
+    const covered = prot() ? (prot().covers || []).filter((c) => same(c.buyer, myAddr())).map((c) => itemById(c.itemId)).filter(Boolean) : [];
+    const protHtml = covered.length ? `<div class="h-label">Protection</div>` + [...new Set(covered)].reverse().map((i) => `
+      <div class="order slim">${art(i, "mini")}<div><h3>${esc(i.name)}</h3><p>${esc(i.brand)} · authenticated by ${esc(nameOf(coverFor(i, myAddr()).shop))}</p>${coverBlock(i)}<div class="actions"><button class="btn ghost small" data-open="${i.id}">View passport</button></div></div></div>`).join("") : "";
+    return head + protHtml + `<div class="h-label">In your collection</div><div class="grid">${mine.map((i) => card(i)).join("")}</div>`;
   }
 
   function disputeLine(d) {
@@ -770,9 +908,10 @@
       <div class="order">${art(i)}
         <div>
           <h3>${esc(i.name)}</h3>
-          <p>${esc(i.brand)} · ${isBuyer ? `from ${esc(nameOf(i.owner))}` : `bought by ${esc(nameOf(i.buyer))}`} · paid ${fmtDate(i.paidAt)} · authenticated by ${esc(nameOf(i.partner))}</p>
+          <p>${esc(i.brand)} · ${isBuyer ? `from ${esc(nameOf(i.owner))}` : `bought by ${esc(nameOf(i.buyer))}`} · paid ${fmtDate(i.paidAt)} · authenticated by ${esc(nameOf(i.partner))}${!isBuyer && coverFor(i, i.buyer) && coverFor(i, i.buyer).paidAt === i.paidAt ? " · buyer added protection" : ""}</p>
           <span class="chip ${b.bad ? "bad" : "held"}">${b.chip}</span>
           <p class="fine">${b.note}</p>
+          ${isBuyer ? coverBlock(i) : ""}
           <div class="actions">${b.actions}<button class="btn ghost" data-open="${i.id}">View passport</button></div>
         </div>
       </div>`;
@@ -804,15 +943,15 @@
   function renderDesk() {
     const p = partnerOf(myAddr());
     const dis = state.busy || readOnly() ? "disabled" : "";
-    if (!p) return `<div class="empty"><h3>This shop isn't an approved partner yet</h3><p>The platform admin approves partners on the contract (addPartner). Once approved, the shop can check IDs, authenticate pieces and help with disputes.</p></div>`;
+    if (!p) return `<div class="empty"><h3>This authenticator isn't an approved partner yet</h3><p>The platform admin approves partners on the contract (addPartner). Once approved, it can check IDs, authenticate pieces and help with disputes.</p></div>`;
     const requests = myRequests();
     const disputes = myShopDisputes();
     let html = `
       <div class="section-head">
-        <div><h2>${esc(p.name)} · ${esc(p.city)}</h2><p>Partner pawn shop${p.active ? "" : " (paused)"}</p></div>
+        <div><h2>${esc(p.name)} · ${esc(p.city)}</h2><p>Partner authenticator${p.active ? "" : " (paused)"}${specialtiesOf(myAddr()).length ? ` · specialist in ${esc(specialtiesOf(myAddr()).map(catName).join(", ").toLowerCase())}` : ""}</p></div>
       </div>
       ${moneyTip()}
-      ${tiles([[unverifiedMembers().length, "IDs to check"], [requests.length, "pieces to verify"], [disputes.length, "open disputes"], [p.membersVerified, "members ID-checked"], [p.authenticated, "pieces authenticated"], [usd(myBalance()), "balance"]])}`;
+      ${tiles([[unverifiedMembers().length, "IDs to check"], [requests.length, "pieces to verify"], ...(prot() ? [[secondOpinions().length, "second opinions"], [usd(BigInt(shopStatsOf(myAddr())?.free ?? 0)), "free bond"]] : []), [disputes.length, "open disputes"], [p.authenticated, "pieces authenticated"], [usd(myBalance()), "balance"]])}`;
 
     if (state.tab === "front") {
       html += `
@@ -840,6 +979,9 @@
       return html;
     }
 
+    if (state.tab === "bond") return html + renderBond(p);
+    if (state.tab === "opinions") return html + renderOpinions();
+
     if (state.tab === "sdisputes") {
       html += `<div class="h-label">Disputes on pieces you authenticated</div>`;
       html += disputes.length ? disputes.map((d) => disputeCard(d, "shop")).join("") : `<div class="empty slim"><p>No open disputes.</p></div>`;
@@ -862,15 +1004,62 @@
     html += requests.length ? requests.map((i) => `
       <div class="order">${art(i)}<div>
         <h3>${esc(i.name)} <small class="muted">Passport #${i.id}</small></h3>
-        <p>${esc(i.brand || "No brand")}${i.details ? ` · ${esc(i.details)}` : ""}</p>
+        <p>${esc(i.brand || "No brand")}${i.details ? ` · ${esc(i.details)}` : ""}${catOf(i) ? ` · ${esc(catName(catOf(i)))}` : ""}</p>
         <span class="chip held">${esc(nameOf(i.owner))} asked on ${fmtDate(reqOf(i.id).createdAt)}</span>
-        <p class="fine">Inspect it in person before you stamp it.</p>
+        <p class="fine">Inspect it in person before you stamp it.${prot() && catOf(i) && specIn(myAddr(), catOf(i)) ? " Your stamp also certifies it for protection, and your bond stands behind it." : ""}</p>
         <div class="actions">
           <button class="btn gold" data-action="auth" data-id="${i.id}" ${dis}>Authenticate</button>
           <button class="btn ghost" data-action="decline" data-id="${i.id}" ${dis}>Can't verify</button>
           <button class="btn ghost" data-open="${i.id}">View passport</button>
         </div>
       </div></div>`).join("") : `<div class="empty slim"><p>Nothing waiting. Sellers' requests show up here.</p></div>`;
+    return html;
+  }
+
+  // Claims on other authenticators' stamps, in categories this shop is approved for.
+  const secondOpinions = () => !prot() ? [] : prot().covers.filter((c) => c.state === "claimed" && !same(c.shop, myAddr()) && !same(c.buyer, myAddr()) && !same(c.seller, myAddr()) && specIn(myAddr(), c.category));
+
+  function renderBond(p) {
+    const ss = shopStatsOf(myAddr()) || { bond: "0", locked: "0", free: "0", covered: 0, fakes: 0, fakesIn: {} };
+    const dis = state.busy || readOnly() ? "disabled" : "";
+    const mine = prot().covers.filter((c) => same(c.shop, myAddr())).reverse();
+    const specs = specialtiesOf(myAddr());
+    return `
+      <div class="h-label">Your bond</div>
+      <div class="panel">
+        <p style="margin-top:0">Your bond stands behind every protected piece you stamped. If a second specialist proves one fake, half the price comes from your bond. Each protected sale holds half the price plus 2% (the re-inspection fee) until its 90 days end.</p>
+        ${tiles([[usd(BigInt(ss.bond)), "staked"], [usd(BigInt(ss.locked)), "held behind live protection"], [usd(BigInt(ss.free)), "free"], [ss.covered, "protected sales on your stamp"], [ss.fakes, ss.fakes === 1 ? "fake proven" : "fakes proven"]])}
+        <div class="row bond-row">
+          <div class="money-input"><span>$</span><input id="bond-amt" type="number" min="0.01" step="0.01" placeholder="Amount" ${dis}></div>
+          <button class="btn gold" data-action="stake-bond" ${dis}>Add to bond</button>
+          <button class="btn ghost" data-action="withdraw-bond" ${dis}>Withdraw free bond</button>
+        </div>
+        <p class="hint">A bigger free bond lets you back more expensive pieces: a $10 piece needs $5.20 free.</p>
+      </div>
+      <div class="h-label">Your specialties</div>
+      <div class="panel people">${specs.length ? specs.map((k) => `
+        <div class="person"><span class="pn"><strong>${esc(catName(k))}</strong><small>${esc(specIn(myAddr(), k).credential)}</small></span><span class="pr">${plural(ss.fakesIn?.[k] || 0, "fake", "fakes")} proven in this category</span></div>`).join("") : `<p class="muted">You're not approved for any category yet. The platform admin approves specialists.</p>`}</div>
+      <div class="h-label">Protected sales on your stamp</div>
+      ${mine.length ? `<div class="done-list">${mine.map((c) => { const it = itemById(c.itemId); return `<button class="done" data-open="${c.itemId}">${it ? art(it, "mini") : ""}<span><strong>${esc(it?.name || "Piece")}</strong><small>${esc(nameOf(c.buyer))} · ${esc(c.state)} · ${usd(BigInt(c.shopLock))} of your bond ${["pending", "active", "claimed"].includes(c.state) ? "held" : c.state === "paid" ? "paid out" : "released"}</small></span><span class="done-amt">${usd(BigInt(c.amount))}</span></button>`; }).join("")}</div>` : `<div class="empty slim"><p>No protected sales yet.</p></div>`}`;
+  }
+
+  function renderOpinions() {
+    const list = secondOpinions();
+    const dis = state.busy || readOnly() ? "disabled" : "";
+    let html = `<div class="h-label">Claims waiting for a second opinion</div><p class="fine">A buyer says a protected piece is fake. You never rule on your own stamps. Re-inspect it and rule: if it's fake, the buyer is refunded and you earn 2% of the price. If you don't rule in 3 days, the platform admin can.</p>`;
+    html += list.length ? list.map((c) => {
+      const it = itemById(c.itemId);
+      return `
+      <div class="order">${it ? art(it) : ""}<div>
+        <h3>${esc(it?.name || "Piece")} <small class="muted">${esc(catName(c.category))}</small></h3>
+        <p>${esc(nameOf(c.buyer))} bought it from ${esc(nameOf(c.seller))} for ${usd(BigInt(c.amount))}. Stamped by ${esc(nameOf(c.shop))}.</p>
+        <div class="evidence"><div><small>Buyer says</small><p>“${esc(c.evidence)}”</p></div><div><small>${esc(nameOf(c.shop))}'s note when it stamped it</small><p>${it?.authNote ? `“${esc(it.authNote)}”` : "—"}</p></div></div>
+        <div class="field"><label for="rule-${c.id}">Your ruling</label><input id="rule-${c.id}" type="text" maxlength="200" placeholder="What you found when you re-inspected it" ${dis}></div>
+        <div class="actions"><button class="btn danger" data-action="decide-claim" data-cover="${c.id}" data-fake="1" ${dis}>It's fake: refund the buyer</button><button class="btn primary" data-action="decide-claim" data-cover="${c.id}" data-fake="0" ${dis}>It's genuine</button>${it ? `<button class="btn ghost" data-open="${it.id}">View passport</button>` : ""}</div>
+      </div></div>`;
+    }).join("") : `<div class="empty slim"><p>No claims waiting. Claims on pieces other authenticators stamped, in your categories, show up here.</p></div>`;
+    const decided = prot().covers.filter((c) => same(c.reviewer, myAddr())).reverse();
+    if (decided.length) html += `<div class="h-label">You ruled</div><div class="done-list">${decided.map((c) => `<button class="done" data-open="${c.itemId}">${itemById(c.itemId) ? art(itemById(c.itemId), "mini") : ""}<span><strong>${esc(itemById(c.itemId)?.name || "Piece")}: ${c.state === "paid" ? "fake" : "genuine"}</strong><small>“${esc(c.ruling)}”</small></span><span class="done-amt">${usd(BigInt(c.amount))}</span></button>`).join("")}</div>`;
     return html;
   }
 
@@ -921,6 +1110,9 @@
     list: "listed a piece", unlist: "took a piece off sale", buy: "bought a piece", ship: "shipped a piece", confirm: "confirmed a delivery",
     claim: "collected a payment", sellerCancel: "refunded a buyer", buyerCancel: "cancelled an unshipped order", dispute: "opened a dispute",
     vote: "voted on a dispute", report: "filed an inspection report", finalize: "closed a dispute vote", resolve: "decided a dispute", fund: "received test dollars",
+    certify: "certified a piece for protection", stakeBond: "staked a bond", withdrawBond: "withdrew bond", poolDeposit: "put money into the protection pool",
+    poolWithdraw: "took money out of the protection pool", buyCover: "added 90-day protection", fileClaim: "filed a claim: says it's fake", decideClaim: "ruled on a claim",
+    coverActivated: "started 90 days of protection", coverVoided: "cancelled protection and refunded the fee",
   };
   function actorName(row) {
     if (row.actor === "treasury") {
@@ -938,18 +1130,47 @@
     if (row.action === "vote") what = `voted for the ${row.detail?.buyerWins ? "buyer" : "seller"} on dispute #${row.detail?.did}`;
     if (row.action === "list" && row.detail?.price) what = `listed it for ${usd(BigInt(row.detail.price))}`;
     if (row.action === "buy" && row.detail?.price) what = `bought it for ${usd(BigInt(row.detail.price))}`;
+    if (row.action === "certify" && row.detail?.category) what = `certified it as ${esc(catName(row.detail.category).toLowerCase())}`;
+    if (["stakeBond", "withdrawBond", "poolDeposit", "poolWithdraw"].includes(row.action) && row.detail?.amount) what = `${ACTION_LABEL[row.action]} (${usd(BigInt(row.detail.amount))})`;
+    if (row.action === "buyCover" && row.detail?.fee) what = `added 90-day protection for ${usd(BigInt(row.detail.fee))} (${pctTxt(row.detail.feeBps)})`;
+    if (row.action === "decideClaim") what = `re-inspected it and ruled it ${row.detail?.fake ? "fake: the buyer was refunded" : "genuine"}`;
     return `
       <div class="ledger-row">
         <span class="lr-when">${fmtWhen(row.at)}</span>
         <span class="lr-what"><strong>${esc(actorName(row))}</strong> ${what}${it ? ` · <button class="linkish" data-open="${it.id}">${esc(it.name)}</button>` : ""}</span>
-        <a class="lr-link" href="${explorerTx(row.hash)}" target="_blank" rel="noopener">Check on Arc ↗</a>
+        <span class="lr-links">${streamChip(row)}<a class="lr-link" href="${explorerTx(row.hash)}" target="_blank" rel="noopener">Check on Arc ↗</a></span>
       </div>`;
+  }
+  // Whether QuickNode Streams independently delivered this transaction's events from Arc.
+  function streamChip(row) {
+    if (!state.streamStatus || !row.hash) return "";
+    const ev = state.streamed[String(row.hash).toLowerCase()];
+    if (ev) return `<span class="qn-chip ok" title="Events: ${esc(ev.join(", "))}">✓ Confirmed by QuickNode Streams</span>`;
+    return now() - row.at > 120 ? `<span class="qn-chip">Waiting for chain feed</span>` : "";
+  }
+  const agoText = (ts) => { const m = Math.max(0, Math.round((now() - ts) / 60)); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
+  const feedLine = () => state.streamStatus ? `<p class="qn-line"><span class="live"></span>Chain feed: QuickNode Streams · block ${state.streamStatus.lastBlock.toLocaleString("en-US")} · ${agoText(state.streamStatus.lastAt)} · ${plural(state.streamStatus.count, "event", "events")}</p>` : "";
+
+  // Community → Chain feed: raw events pushed by QuickNode Streams, not our own database of app actions.
+  function renderFeed() {
+    const nameArg = (k, v) => (/At$/.test(k) && /^\d{9,10}$/.test(String(v)) ? fmtDate(v) : typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v) ? nameOf(v) : /category|key/i.test(k) && /^0x[0-9a-f]{64}$/i.test(v || "") ? (catName(ethers.decodeBytes32String(v)) || v) : typeof v === "string" && /^\d{16,}$/.test(v) ? usd(BigInt(v)) : String(v));
+    const argsText = (a) => Object.entries(a || {}).slice(0, 5).map(([k, v]) => `${esc(k)}: ${esc(nameArg(k, v))}`).join(" · ");
+    return `
+      <div class="section-head"><div><h2>Chain feed</h2><p>Raw events from the contracts, pushed by QuickNode Streams. This list doesn't come from our database of app actions.</p></div></div>
+      ${feedLine()}
+      <div class="panel ledger">${state.chainFeed.map((e) => `
+        <div class="ledger-row">
+          <span class="lr-when">Block ${e.block.toLocaleString("en-US")}<br><small>${fmtWhen(e.at)}</small></span>
+          <span class="lr-what"><strong>${esc(e.event)}</strong> <small class="muted">${e.contract === "protection" ? "protection" : "marketplace"}</small><br><small>${argsText(e.args)}</small></span>
+          <a class="lr-link" href="${explorerTx(e.hash)}" target="_blank" rel="noopener">Check on Arc ↗</a>
+        </div>`).join("") || `<p class="muted">No events yet.</p>`}</div>`;
   }
 
   function renderLedger() {
     const rows = state.ledger.filter((r) => r.action !== "fund" || readOnly());
     return `
       <div class="section-head"><div><h2>Community ledger</h2><p>Every action, with proof on Arc.</p></div></div>
+      ${feedLine()}
       ${tiles([[stats().members, "members"], [stats().verified, "ID-checked"], [stats().passports, "passports"], [stats().sales, "sales settled"], [usd(stats().held), "held right now"], [stats().open, "open disputes"]])}
       <div class="panel ledger">${rows.length ? rows.map(ledgerLine).join("") : `<p class="muted">Nothing yet.</p>`}</div>
       `;
@@ -967,19 +1188,61 @@
         <div class="person" style="--depth:${depth}">
           ${avatar(u.name, u.handle, "avatar mini-av")}
           <span class="pn"><strong>${esc(u.name)}</strong><small>${esc(lvl.label)}${u.invitedBy ? ` · invited by ${esc(dirBy(u.invitedBy)?.name || "—")}` : " · founding member"}</small></span>
-          <span class="pr">${r.sold} sold · ${r.bought} bought · ${r.disputesLost} lost${r.votesCast ? ` · ${r.votesWithMajority}/${r.votesCast} votes with majority` : ""}${r.inviteesDisputesLost ? ` · <span class="warn">${r.inviteesDisputesLost} lost by invitees</span>` : ""}</span>
+          <span class="pr">${r.sold} sold · ${r.bought} bought · ${r.disputesLost} lost${r.votesCast ? ` · ${r.votesWithMajority}/${r.votesCast} votes with majority` : ""}${r.inviteesDisputesLost ? ` · <span class="warn">${r.inviteesDisputesLost} lost by invitees</span>` : ""}${memberProt(u.address)?.fakesSold ? ` · <span class="warn">${plural(memberProt(u.address).fakesSold, "fake", "fakes")} sold</span>` : ""}</span>
+          ${memberProt(u.address)?.rate ? `<span class="rate-pill" title="Protection rate on a watch they sell: ${esc(rateWords(memberProt(u.address).rate).join(", "))}">${pctTxt(memberProt(u.address).rate.feeBps)}</span>` : ""}
           ${state.isAdmin && !state.viewAs ? `<button class="btn ghost small" data-action="view-as" data-handle="${esc(u.handle)}">View as</button>` : ""}
         </div>` + (byInviter[u.handle] || []).map((c) => row(c, depth + 1)).join("");
     };
     const roots = members.filter((u) => !u.invitedBy || !members.some((m) => m.handle === u.invitedBy));
     return `
-      <div class="section-head"><div><h2>Members</h2><p>${plural(members.length, "member", "members")}, grouped by who invited whom.</p></div></div>
+      <div class="section-head"><div><h2>Members</h2><p>${plural(members.length, "member", "members")}, grouped by who invited whom.${prot() ? " The % is each member's protection rate on a watch they sell, from their record and their inviter's." : ""}</p></div></div>
       <div class="panel people">${roots.map((u) => row(u, 0)).join("") || `<p class="muted">No members yet.</p>`}</div>
-      <div class="h-label">Partner pawn shops</div>
+      <div class="h-label">Partner authenticators</div>
       <div class="panel people">${shops.map((p) => `
-        <div class="person">${avatar(p.name, p.addr, "avatar mini-av")}<span class="pn"><strong>${esc(p.name)}</strong><small>${esc(p.city)}${p.active ? "" : " · paused"}</small></span>
-          <span class="pr">${p.membersVerified} IDs checked · ${p.authenticated} pieces authenticated · ${p.reportsFiled} reports · ${p.disputesResolved} decided</span>
+        <div class="person">${avatar(p.name, p.addr, "avatar mini-av")}<span class="pn"><strong>${esc(p.name)}</strong><small>${esc(p.city)}${p.active ? "" : " · paused"}${specialtiesOf(p.addr).map((k) => ` · ${esc(catName(k))}: ${esc(specIn(p.addr, k).credential)}`).join("")}</small></span>
+          <span class="pr">${p.membersVerified} IDs checked · ${p.authenticated} pieces authenticated · ${p.reportsFiled} reports · ${p.disputesResolved} decided${shopStatsOf(p.addr) ? ` · ${usd(BigInt(shopStatsOf(p.addr).bond))} bond · ${specialtiesOf(p.addr).map((k) => `${shopStatsOf(p.addr).fakesIn?.[k] || 0} fakes in ${esc(catName(k).toLowerCase())}`).join(", ")}` : ""}</span>
           ${state.isAdmin && !state.viewAs && dirByAddr(p.addr) ? `<button class="btn ghost small" data-action="view-as" data-handle="${esc(dirByAddr(p.addr).handle)}">View as</button>` : ""}</div>`).join("") || `<p class="muted">No partners yet.</p>`}</div>`;
+  }
+
+  // Community → Protection: the pool members fund, what it stands behind, and every protected sale.
+  function renderProtection() {
+    const p = prot();
+    const pool = p.pool;
+    const dis = state.busy || readOnly() ? "disabled" : "";
+    const me = viewer();
+    const mine = me ? memberProt(me.address) : null;
+    const isMember = me?.role === "member";
+    const label = { pending: "Waiting for delivery", active: "Active", claimed: "Claim under review", paid: "Fake: refunded", rejected: "Claim rejected", expired: "Ended, no claim", void: "Sale cancelled, fee refunded" };
+    const rows = p.covers.slice().reverse().map((c) => {
+      const it = itemById(c.itemId);
+      return `<button class="done" data-open="${c.itemId}">${it ? art(it, "mini") : ""}<span><strong>${esc(it?.name || "Piece")}</strong><small>${esc(nameOf(c.buyer))} from ${esc(nameOf(c.seller))} · stamped by ${esc(nameOf(c.shop))} · fee ${usd(BigInt(c.fee))} (${pctTxt(c.feeBps)})</small></span><span class="chip ${c.state === "paid" ? "bad" : c.state === "active" || c.state === "pending" ? "ok" : "owned"}">${label[c.state]}</span></button>`;
+    });
+    return `
+      <div class="section-head"><div><h2>Protection</h2><p>Members fund the pool that stands behind protected purchases, and earn the fees.</p></div></div>
+      ${tiles([[usd(BigInt(pool.assets)), "in the pool"], [usd(BigInt(pool.locked)), "behind live protection"], [usd(BigInt(pool.fees)), "fees earned"], [usd(BigInt(pool.paid)), "paid out on fakes"], [usd(totalBonds()), "staked by authenticators"], [p.covers.length, "purchases protected"]])}
+      <div class="panel">
+        <h3 style="margin-top:0">How a claim is paid</h3>
+        <p class="fine" style="margin-top:0">On a $100 piece: the authenticator's bond pays the first $50 and the pool pays $50, so the buyer gets the full price back. The second specialist who re-inspected it earns $2 from the bond. If the piece is genuine, the buyer's 5% claim deposit pays the reviewer and the rest goes to the pool.</p>
+        ${isMember && !readOnly() ? `
+        <div class="h-label">Your stake</div>
+        ${tiles([[usd(BigInt(mine?.value ?? 0)), "your stake is worth"]])}
+        <div class="row bond-row">
+          <div class="money-input"><span>$</span><input id="pool-amt" type="number" min="0.01" step="0.01" placeholder="Amount" ${dis}></div>
+          <button class="btn gold" data-action="pool-deposit" ${dis}>Add to the pool</button>
+          <button class="btn ghost" data-action="pool-withdraw" ${dis}>Withdraw</button>
+        </div>
+        <p class="hint">Fees raise the value of every stake. Money held behind live protection can't be withdrawn until those 90 days end. This is community protection on test dollars, not a licensed product.</p>` : isMember ? tiles([[usd(BigInt(mine?.value ?? 0)), `${esc(me.name)}'s stake`]]) : ""}
+      </div>
+      <div class="h-label">How the price is set</div>
+      <div class="panel rate-table">
+        <div class="why-row"><span><b>Category base</b><small>${p.categories.filter((c) => c.active).map((c) => `${esc(c.name)} ${pctTxt(c.baseBps)}`).join(" · ")}</small></span></div>
+        <div class="why-row"><span><b>Seller</b><small>New seller +2% · each completed sale −0.25% (up to −1.5%) · each dispute lost +3% · each refund +1% · each proven fake +5%</small></span></div>
+        <div class="why-row"><span><b>Who invited the seller</b><small>+1% for each dispute lost by anyone they invited, up to +3%</small></span></div>
+        <div class="why-row"><span><b>Authenticator</b><small>+4% for each fake it stamped in this category · −0.5% with 10+ stamps and no fakes</small></span></div>
+        <p class="fine">The total is kept between 1% and 20% of the price. The contract on Arc calculates it.</p>
+      </div>
+      <div class="h-label">Protected purchases</div>
+      ${rows.length ? `<div class="done-list">${rows.join("")}</div>` : `<div class="empty slim"><p>No protected purchases yet.</p></div>`}`;
   }
 
   function renderCommunityDisputes() {
@@ -999,7 +1262,7 @@
       const v = viewer();
       return `<div class="section-head"><div><h2>Invites & credits</h2><p>Each member's invites and credits are private to them.</p></div></div>${v && v.role === "member" ? memberCard(v) : ""}`;
     }
-    if (me.role !== "member") return `<div class="empty"><h3>Invites are for members</h3><p>Pawn shops don't invite members; they check IDs at the front desk.</p></div>`;
+    if (me.role !== "member") return `<div class="empty"><h3>Invites are for members</h3><p>Authenticators don't invite members; they check IDs at the front desk.</p></div>`;
     const a = me.allowance || { left: 0, total: 0, used: 0 };
     const credits = me.credits || [];
     return `
@@ -1024,6 +1287,7 @@
     const treasury = state.directory.find((u) => u.role === "treasury");
     const dis = state.busy ? "disabled" : "";
     if (state.tab === "members") return renderPeople();
+    if (state.tab === "specialists") return renderSpecialists();
     if (state.tab === "setup") {
       const shop = state.directory.find((u) => u.handle === "shop");
       const seeded = state.directory.filter((u) => u.seeded).length;
@@ -1036,22 +1300,57 @@
           ${check(["maya", "alex"].every((h) => dirBy(h) && isVerified(dirBy(h).address)), "Maya and Alex are members with their IDs checked")}
           ${check(seeded >= 10, `Community members added: ${seeded} of 10`)}
           ${check(state.ledger.some((r) => r.action === "vote"), "Demo history played: sales, listings and a dispute decided by a member panel")}
+          ${CFG.protectionAddress ? `
+          ${check(!!prot(), `Protection contract connected ${short(CFG.protectionAddress)}`)}
+          ${check(specPlanDone(), `Specialists approved (Admin → Specialists)`)}
+          ${check(!!prot() && prot().covers.some((c) => c.state === "paid"), "Protection demo played: bonds, the pool, a fake refunded and a claim rejected")}` : `<li><span>○</span>Protection is off. Deploy WardrobeProtection and set PROTECTION_ADDRESS on Vercel to switch it on.</li>`}
         </ul>
         <div class="row">
           <button class="btn gold" data-action="admin-setup" ${dis}>Set up demo accounts</button>
           <button class="btn primary" data-action="admin-seed" ${dis}>Add community members</button>
           <button class="btn ghost" data-action="admin-history" ${dis}>Play demo history</button>
+          ${prot() ? `<button class="btn gold" data-action="admin-protection" ${dis}>Play protection demo</button>` : ""}
         </div>
         <p class="fine">The platform wallet must be approved once with setOperator (done in Remix). The treasury pays network fees and gives each new member a little test money: it holds ${treasury ? usd(balanceOf(treasury.address)) : "—"}. Refill it from <a href="${CFG.faucet}" target="_blank" rel="noopener">Circle's faucet</a> at <span class="mono-inline">${esc(treasury?.address || "")}</span>.</p></div>`;
     }
     if (state.tab === "side") return renderSideBySide();
     return `
       <div class="section-head"><div><h2>Admin overview</h2><p>The whole community at a glance.</p></div></div>
-      ${tiles([[s.members, "members"], [s.verified, "ID-checked"], [state.partners.length, "pawn shops"], [s.passports, "passports"], [state.items.filter((i) => i.status === STATUS.LISTED).length, "for sale"], [usd(s.volume), `volume in ${plural(s.sales, "sale", "sales")}`], [usd(s.held), "held in the contract"], [s.open, "open disputes"]])}
+      ${tiles([[s.members, "members"], [s.verified, "ID-checked"], [state.partners.length, "authenticators"], [s.passports, "passports"], [state.items.filter((i) => i.status === STATUS.LISTED).length, "for sale"], [usd(s.volume), `volume in ${plural(s.sales, "sale", "sales")}`], [usd(s.held), "held in the contract"], [s.open, "open disputes"],
+        ...(state.streamStatus ? [[state.streamStatus.count, "events streamed"]] : []),
+        ...(prot() ? [[usd(totalBonds()), "staked in bonds"], [usd(BigInt(prot().pool.assets)), "in the protection pool"], [prot().covers.length, "purchases protected"], [prot().covers.filter((c) => c.state === "claimed").length, "claims open"]] : [])])}
       <div class="h-label">Open disputes</div>
       ${openDisputes().length ? openDisputes().map((d) => disputeCard(d, "admin")).join("") : `<div class="empty slim"><p>No open disputes.</p></div>`}
       <div class="h-label">Latest activity</div>
       <div class="panel ledger">${state.ledger.slice(0, 12).map(ledgerLine).join("") || `<p class="muted">Nothing yet.</p>`}</div>`;
+  }
+
+  const planShop = (h) => dirBy(h);
+  const specPlanDone = () => !!prot() && (CFG.specialistPlan || []).every((x) => planShop(x.shop) && specIn(planShop(x.shop).address, x.category));
+  // Admin → Specialists: approve which authenticator may certify which category. These are
+  // admin transactions on the contracts, so they're signed with the admin's MetaMask.
+  function renderSpecialists() {
+    const dis = state.busy ? "disabled" : "";
+    if (!CFG.protectionAddress) return `<div class="section-head"><div><h2>Specialists</h2></div></div><div class="empty"><h3>Protection is off</h3><p>Deploy WardrobeProtection in Remix, then set PROTECTION_ADDRESS on Vercel and redeploy.</p></div>`;
+    const shop2 = dirBy("shop2");
+    const s2ok = shop2 && partnerOf(shop2.address);
+    const rows = (CFG.specialistPlan || []).map((x, i) => {
+      const u = planShop(x.shop);
+      const ok = u && specIn(u.address, x.category);
+      return `<div class="person"><span class="pn"><strong>${esc(u?.name || x.shop)} · ${esc(catName(x.category))}</strong><small>${esc(x.credential)}</small></span>
+        <span>${ok ? `<span class="chip ok">Approved</span>` : u && partnerOf(u.address) ? `<button class="btn gold small" data-action="approve-spec" data-plan="${i}" ${dis}>Approve with MetaMask</button>` : `<span class="chip owned">Approve the partner first</span>`}</span></div>`;
+    }).join("");
+    return `
+      <div class="section-head"><div><h2>Specialists</h2><p>Only a specialist can certify a piece for protection, and only a second specialist in the same category can rule on a claim.</p></div></div>
+      <div class="panel">
+        <ul class="checklist">
+          <li class="${s2ok ? "ok" : ""}"><span>${s2ok ? "✓" : "○"}</span>Second Opinion Jewelers is a partner on the marketplace contract${shop2 ? ` <span class="mono-inline">${esc(shop2.address)}</span>` : " (run Set up demo accounts first)"}</li>
+        </ul>
+        ${!s2ok && shop2 ? `<div class="row"><button class="btn gold" data-action="approve-shop2" ${dis}>Approve as a partner with MetaMask</button></div><p class="fine">Or in Remix, on WardrobePassportV3: addPartner(${esc(shop2.address)}, "Second Opinion Jewelers", "Atlanta").</p>` : ""}
+      </div>
+      <div class="h-label">Approvals</div>
+      <div class="panel people">${rows}</div>
+      <p class="fine">Each approval is one transaction from the admin wallet to the protection contract ${short(CFG.protectionAddress)} (setSpecialist). MetaMask must be on Arc Testnet.</p>`;
   }
 
   function renderSideBySide() {
@@ -1075,7 +1374,7 @@
     }
     return `
       <div class="section-head"><div><h2>Side by side</h2><p>Every live piece, from each side.</p></div></div>
-      <div class="sbs">${col("Sellers", "Pieces on their way to a sale", sellers)}${col("Buyers", "Orders in progress", buyers)}${col("Pawn shops", "Queues waiting for the shop", shops)}</div>`;
+      <div class="sbs">${col("Sellers", "Pieces on their way to a sale", sellers)}${col("Buyers", "Orders in progress", buyers)}${col("Authenticators", "Queues waiting for each authenticator", shops)}</div>`;
   }
 
   function renderFoot() {
@@ -1114,8 +1413,9 @@
       home: renderSellerHome, pieces: renderPieces, sales: () => renderOrders("selling"),
       shop: renderShop, orders: () => renderOrders("buying"), mine: renderMine,
       front: renderDesk, requests: renderDesk, sdisputes: renderDesk, record: renderDesk,
-      ledger: renderLedger, people: renderPeople, disputes: renderCommunityDisputes, invite: renderInvite,
-      overview: renderAdmin, side: renderAdmin, members: renderAdmin, setup: renderAdmin,
+      ledger: renderLedger, feed: renderFeed, people: renderPeople, disputes: renderCommunityDisputes, invite: renderInvite, protection: renderProtection,
+      bond: renderDesk, opinions: renderDesk,
+      overview: renderAdmin, side: renderAdmin, members: renderAdmin, setup: renderAdmin, specialists: renderAdmin,
     };
     const scroll = window.scrollY;
     const html = (R[state.tab] || (() => ""))();
@@ -1139,7 +1439,7 @@
       case STATUS.PAID: return "Sold · payment held, waiting to ship";
       case STATUS.SHIPPED: return "Sold · shipped, payment held";
       case STATUS.DISPUTED: return "Sale in dispute · payment held";
-      default: return "In owner's wardrobe";
+      default: return "With its owner";
     }
   }
   function timelineHtml(item) {
@@ -1148,6 +1448,14 @@
       ? `<li><div class="t-main">Passport issued to ${esc(nameOf(t.to))}</div><div class="t-sub">${fmtDate(t.at)}</div></li>`
       : `<li><div class="t-main">${esc(nameOf(t.from))} → ${esc(nameOf(t.to))} for ${usd(t.price)}</div><div class="t-sub">${fmtDate(t.at)} · sale settled, payment released</div></li>` }));
     if (!isZero(item.authBy)) rows.push({ at: item.authAt, html: `<li class="t-auth"><div class="t-main">Authenticated by ${esc(nameOf(item.authBy))}</div><div class="t-sub">${fmtDate(item.authAt)}${item.authNote ? ` · “${esc(item.authNote)}”` : ""}</div></li>` });
+    if (prot()) {
+      if (certified(item)) rows.push({ at: item.authAt + 1, html: `<li class="t-auth"><div class="t-main">Certified as ${esc(catName(prot().categoryOf[item.id]).toLowerCase())} by a specialist</div><div class="t-sub">Can be protected for 90 days after delivery</div></li>` });
+      for (const c of coversOf(item)) {
+        rows.push({ at: c.boughtAt, html: `<li><div class="t-main">${esc(nameOf(c.buyer))} added 90-day protection for ${usd(BigInt(c.fee))}</div><div class="t-sub">${fmtDate(c.boughtAt)} · ${pctTxt(c.feeBps)} · backed by ${esc(nameOf(c.shop))}'s bond and the members' pool</div></li>` });
+        if (c.state === "paid") rows.push({ at: c.claimedAt, html: `<li class="t-dispute"><div class="t-main">Proven fake by ${esc(nameOf(c.reviewer))}. ${esc(nameOf(c.buyer))} was refunded ${usd(BigInt(c.amount))}</div><div class="t-sub">${fmtDate(c.claimedAt)} · “${esc(c.ruling)}”</div></li>` });
+        if (c.state === "rejected") rows.push({ at: c.claimedAt, html: `<li><div class="t-main">Claim checked by ${esc(nameOf(c.reviewer))}: genuine</div><div class="t-sub">${fmtDate(c.claimedAt)} · “${esc(c.ruling)}”</div></li>` });
+      }
+    }
     for (const d of state.disputes.filter((x) => x.itemId === item.id && x.resolved)) {
       rows.push({ at: d.openedAt, html: `<li class="t-dispute"><div class="t-main">Dispute #${d.id}: ${d.buyerWon ? "buyer" : "seller"} won</div><div class="t-sub">${fmtDate(d.openedAt)} · decided by ${d.decidedByPanel ? "a member panel" : esc(nameOf(d.partner))}</div></li>` });
     }
@@ -1155,7 +1463,7 @@
     return rows.length ? rows.map((r) => r.html).join("") : `<li><div class="t-sub">No history yet.</div></li>`;
   }
   function authLine(item) {
-    if (isZero(item.authBy)) return `<div class="callout info">Not yet authenticated. It can't be listed for sale until a partner pawn shop has checked it in person.</div>`;
+    if (isZero(item.authBy)) return `<div class="callout info">Not yet authenticated. It can't be listed for sale until a partner authenticator has checked it in person.</div>`;
     const p = partnerOf(item.authBy);
     const who = `${esc(nameOf(item.authBy))}${p ? `, ${esc(p.city)}` : ""}`;
     if (!verified(item)) return `<div class="callout info">Authenticated by ${who} on ${fmtDate(item.authAt)}, before it last changed hands. It needs a fresh check before it can be sold again.</div>`;
@@ -1275,11 +1583,13 @@
           <p class="pid-line">Passport No. ${pad(item.id)} · <a href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">on Arc ↗</a></p>
           <h4 class="detail-title">${esc(item.name)}</h4>
           <p class="detail-brand">${esc(item.brand || "No brand")}${item.details ? `, ${esc(item.details)}` : ""}</p>
-          ${verified(item) ? `<div class="trust"><span class="ti">✓</span><span><b>Checked in person</b><small>${esc(shop ? `${shop.name}, ${shop.city}` : nameOf(item.authBy))} · ${fmtDate(item.authAt)}</small></span></div>` : authLine(item)}
+          ${verified(item) ? `<div class="trust"><span class="ti">✓</span><span><b>Checked in person${catOf(item) && specIn(item.authBy, catOf(item)) ? ` by a ${esc(catName(catOf(item)).toLowerCase())} specialist` : ""}</b><small>${esc(shop ? `${shop.name}, ${shop.city}` : nameOf(item.authBy))} · ${fmtDate(item.authAt)}${catOf(item) && specIn(item.authBy, catOf(item)) ? ` · ${esc(specIn(item.authBy, catOf(item)).credential)}` : ""}</small></span></div>` : authLine(item)}
+          ${bondBacked(item) ? `<div class="trust"><span class="ti bond-ti">$</span><span><b>Bond-backed</b><small>${esc(nameOf(item.authBy))} has ${usd(BigInt(shopStatsOf(item.authBy).free))} staked and free to stand behind its stamps. If this piece turns out fake, the bond pays first.</small></span></div>` : ""}
           <div class="trust"><span class="ti">${esc((nameOf(item.owner) || "?")[0])}</span><span><b>${esc(nameOf(item.owner))}</b><small>${esc(levelOf(item.owner).label)} · ${esc(recText(item.owner))}</small></span></div>
           <div class="pricebox">
             <div class="pb-top"><span class="pb-price">${item.status === STATUS.LISTED ? usd(item.price) : f.lastSale ? usd(f.lastSale.price) : "Not for sale"}</span><small data-status></small></div>
             <div data-actions></div>
+            <div data-protect></div>
           </div>
           <button class="linkish share-link" data-action="share" data-id="${item.id}">Share this passport</button>
         </div>
@@ -1291,16 +1601,23 @@
     refreshDetailActions();
   }
 
-  function partnerSelect(id) {
-    const list = activePartners().filter((p) => !same(p.addr, myAddr()));
+  /** Authenticators to ask: with protection on, only specialists in the piece's category, with their credential and record there. */
+  function partnerSelect(id, cat) {
+    let list = activePartners().filter((p) => !same(p.addr, myAddr()));
+    if (prot() && cat) list = list.filter((p) => specIn(p.addr, cat));
     if (!list.length) return "";
-    return `<select id="${id}" class="select">${list.map((p) => `<option value="${esc(p.addr)}">${esc(p.name)} · ${esc(p.city)}</option>`).join("")}</select>`;
+    const label = (p) => {
+      if (!prot() || !cat) return `${p.name} · ${p.city}`;
+      const fakes = shopStatsOf(p.addr)?.fakesIn?.[cat] || 0;
+      return `${p.name} · ${specIn(p.addr, cat).credential} · ${fakes ? plural(fakes, "fake", "fakes") : "no fakes"} in ${catName(cat).toLowerCase()}`;
+    };
+    return `<select id="${id}" class="select">${list.map((p) => `<option value="${esc(p.addr)}">${esc(label(p))}</option>`).join("")}</select>`;
   }
   function depositHint(priceStr) {
     const price = parseFloat(priceStr);
-    if (!(price > 0)) return `You lock a 10% deposit while it's listed. It comes back when the sale completes or you take it off sale. The pawn shop earns 3% of the sale.`;
+    if (!(price > 0)) return `You lock a 10% deposit while it's listed. It comes back when the sale completes or you take it off sale. The authenticator earns 3% of the sale.`;
     const w = toWei(price.toFixed(2));
-    return `You lock a ${usd(depositOf(w))} deposit now and get it back when the sale completes. On a sale you receive ${usd(w - feeOf(w))}; the pawn shop earns ${usd(feeOf(w))}.`;
+    return `You lock a ${usd(depositOf(w))} deposit now and get it back when the sale completes. On a sale you receive ${usd(w - feeOf(w))}; the authenticator earns ${usd(feeOf(w))}.`;
   }
 
   function refreshDetailActions() {
@@ -1326,7 +1643,7 @@
     } else if (isOwner && item.status === STATUS.OWNED && v?.role === "member") {
       const st = authStage(item);
       if (st === "verified" && !isVerified(myAddr())) {
-        html = `<div class="callout held"><strong>Authenticated. One more step to list it:</strong> get your ID checked at a partner pawn shop. Show your member code <span class="mono-inline">${esc(v.handle)}</span> and a photo ID.</div>`;
+        html = `<div class="callout held"><strong>Authenticated. One more step to list it:</strong> get your ID checked at a partner authenticator. Show your member code <span class="mono-inline">${esc(v.handle)}</span> and a photo ID.</div>`;
       } else if (st === "verified") {
         html = `
         <div class="field">
@@ -1336,22 +1653,22 @@
           <span class="hint" data-deposit-hint>${depositHint("")}</span>
         </div>`;
       } else if (st === "pending") {
-        html = `<div class="callout held"><strong>Waiting for ${esc(nameOf(reqOf(item.id).partner))}.</strong><br>Take the piece to the shop. Once they've checked it and stamped its passport, you can list it.</div><button class="btn ghost block" data-action="cancel-auth" data-id="${item.id}" ${dis}>Cancel the request</button>`;
+        html = `<div class="callout held"><strong>Waiting for ${esc(nameOf(reqOf(item.id).partner))}.</strong><br>Take the piece to them. Once they've checked it and stamped its passport, you can list it.</div><button class="btn ghost block" data-action="cancel-auth" data-id="${item.id}" ${dis}>Cancel the request</button>`;
       } else {
-        const sel = partnerSelect("auth-partner");
+        const sel = partnerSelect("auth-partner", catOf(item));
         const r = reqOf(item.id);
         html = (st === "declined" ? `<div class="callout bad"><strong>${esc(nameOf(r.partner))} couldn't verify this piece.</strong>${r.note ? `<br>“${esc(r.note)}”` : ""}</div>` : "") + (sel ? `
-        <div class="field"><label for="auth-partner">Step 1: get it authenticated</label>${sel}<span class="hint">The pawn shop checks the piece in person and stamps its passport. After that you can list it.</span></div>
-        <button class="btn gold block" data-action="request-auth" data-id="${item.id}" ${dis}>Request authentication</button>` : `<div class="callout info">No pawn shop is approved yet, so pieces can't be verified or listed.</div>`);
+        <div class="field"><label for="auth-partner">Step 1: get it authenticated${catOf(item) ? ` by a ${esc(catName(catOf(item)).toLowerCase())} specialist` : ""}</label>${sel}<span class="hint">They check the piece in person and stamp its passport. After that you can list it.</span></div>
+        <button class="btn gold block" data-action="request-auth" data-id="${item.id}" ${dis}>Request authentication</button>` : `<div class="callout info">No authenticator is approved for ${catOf(item) ? esc(catName(catOf(item)).toLowerCase()) : "this"} yet, so this piece can't be verified or listed.</div>`);
       }
     } else if (isOwner && item.status === STATUS.LISTED) {
-      html = `<div class="callout info">Listed for <strong>${usd(item.price)}</strong>, authenticated by ${esc(nameOf(item.partner))}. Your ${usd(item.deposit)} deposit is locked.${paused(item) ? `<br><strong>Paused:</strong> ${plural(flagsOf(item.id).count, "member flagged", "members flagged")} it. The pawn shop will review.` : ""}</div><button class="btn ghost block" data-action="unlist" data-id="${item.id}" ${dis}>Take it off sale and get the deposit back</button>`;
+      html = `<div class="callout info">Listed for <strong>${usd(item.price)}</strong>, authenticated by ${esc(nameOf(item.partner))}. Your ${usd(item.deposit)} deposit is locked.${paused(item) ? `<br><strong>Paused:</strong> ${plural(flagsOf(item.id).count, "member flagged", "members flagged")} it. The authenticator will review.` : ""}</div><button class="btn ghost block" data-action="unlist" data-id="${item.id}" ${dis}>Take it off sale and get the deposit back</button>`;
     } else if ((isOwner || isBuyer) && IN_SALE.includes(item.status)) {
       const b = saleBlock(item);
       html = `<div class="callout ${b.bad ? "bad" : "held"}"><strong>${b.chip}</strong><br>${b.note}</div><div class="actions-col">${b.actions.replace(/class="btn /g, 'class="btn block ')}</div>`;
     } else if (v?.role === "member" && item.status === STATUS.LISTED) {
       const fl = flagsOf(item.id);
-      html = (paused(item) ? `<div class="callout bad">This listing is paused while the pawn shop reviews flags from members.</div>` : `<button class="btn gold block" data-action="buy" data-id="${item.id}" ${dis}>Buy for ${usd(item.price)}</button>`) +
+      html = (paused(item) ? `<div class="callout bad">This listing is paused while the authenticator reviews flags from members.</div>` : `<button class="btn gold block" data-action="buy" data-id="${item.id}" ${dis}>Buy for ${usd(item.price)}</button>`) +
         `<button class="linkish flag-link" data-action="${fl.mine ? "unflag" : "flag"}" data-id="${item.id}" ${dis}>${fl.mine ? "Remove my flag" : "Flag this listing as suspicious"}</button>${fl.count ? `<span class="hint"> · ${plural(fl.count, "flag", "flags")} so far</span>` : ""}`;
     } else if (isOwner) {
       html = `<div class="callout ok">This piece is yours. Its passport names you as the owner.</div>`;
@@ -1359,6 +1676,20 @@
       html = `<div class="callout info">Someone has already paid for this piece.</div>`;
     }
     if (box.dataset.sig !== html) { box.innerHTML = html; box.dataset.sig = html; }
+    const pbox = $("[data-protect]");
+    if (pbox) {
+      const q = quoteOf(item);
+      let ph = "";
+      if (q && item.status === STATUS.LISTED) {
+        ph = q.available
+          ? `<div class="prot-quote"><span class="shield" aria-hidden="true">🛡</span><span><b>Add 90-day protection: ${usd(q.fee)}</b><small>${pctTxt(q.feeBps)} of the price, offered after you pay. If a second specialist finds it's fake within 90 days of delivery, you get the full price back.</small></span></div>${whyPriceHtml(item, q)}`
+          : `<p class="hint">${certified(item) ? "Protection isn't available on this piece right now." : "Not certified by a specialist, so it can't be protected."}</p>`;
+      } else if (isBuyer || (isOwner && coverFor(item, myAddr()))) {
+        ph = coverBlock(item);
+        if (q && isBuyer && [STATUS.PAID, STATUS.SHIPPED].includes(item.status) && !coverFor(item, myAddr())) ph += whyPriceHtml(item, q);
+      }
+      if (pbox.dataset.sig !== ph) { const open = pbox.querySelector("details")?.open; pbox.innerHTML = ph; pbox.dataset.sig = ph; if (open && pbox.querySelector("details")) pbox.querySelector("details").open = true; }
+    }
   }
 
   document.addEventListener("input", (ev) => {
@@ -1396,17 +1727,19 @@
 
   // -------------------------------------------------------------- add item
   function openAddItem() {
-    const picks = Object.entries(ICONS).map(([k, v], idx) => `
-      <div><input type="radio" name="kind" id="kind-${k}" value="${k}" ${idx === 0 ? "checked" : ""}><label for="kind-${k}"><svg viewBox="0 0 64 64">${v.svg}</svg>${v.label}</label></div>`).join("");
+    const cats = (CFG.categories || []).filter((c) => !prot() || prot().categories.some((x) => x.key === c.key && x.active));
+    const picks = cats.map((c, idx) => `
+      <div><input type="radio" name="cat" id="cat-${c.key}" value="${c.key}" data-icon="${c.icon}" ${idx === 0 ? "checked" : ""}><label for="cat-${c.key}"><svg viewBox="0 0 64 64">${ICONS[c.icon].svg}</svg>${esc(c.name)}</label></div>`).join("");
     const samples = SAMPLES.map((s, i) => `<button type="button" class="sample" data-sample="${i}">${esc(s.name)}</button>`).join("");
-    const sel = partnerSelect("f-partner");
+    const sel = partnerSelect("f-partner", cats[0]?.key);
     let photoData = "";
     openModal("Add a piece", `
       <form id="add-form" novalidate>
         <div class="samples"><span>Quick fill:</span>${samples}</div>
-        <div class="field"><label for="f-name">What is it?</label><input id="f-name" type="text" maxlength="60" placeholder="e.g. Navy wool blazer" required></div>
+        <div class="field"><label>Category</label><div class="icon-pick">${picks}</div><span class="hint">A specialist in this category authenticates it. The category also sets the base protection rate.</span></div>
+        <div class="field"><label for="f-name">What is it?</label><input id="f-name" type="text" maxlength="60" placeholder="e.g. Steel dive watch" required></div>
         <div class="row">
-          <div class="field"><label for="f-brand">Brand</label><input id="f-brand" type="text" maxlength="40" placeholder="e.g. Hugo Boss"></div>
+          <div class="field"><label for="f-brand">Brand</label><input id="f-brand" type="text" maxlength="40" placeholder="e.g. Seiko"></div>
           <div class="field"><label for="f-details">Details</label><input id="f-details" type="text" maxlength="80" placeholder="Size, condition, serial no."></div>
         </div>
         <div class="field">
@@ -1421,27 +1754,27 @@
             </div>
           </div>
         </div>
-        <div class="field" id="f-kind-wrap"><label>Or pick an icon</label><div class="icon-pick">${picks}</div></div>
-        ${sel ? `
-        <label class="check"><input id="f-sell" type="checkbox" checked> Ask a pawn shop to authenticate it now</label>
-        <div class="field" id="f-price-wrap"><label for="f-partner" class="sub-label">Pawn shop</label>${sel}<span class="hint">They check the piece in person. Once it's stamped, you can list it.</span></div>` : ""}
+        <label class="check"><input id="f-sell" type="checkbox" ${sel ? "checked" : ""}> Ask a specialist to authenticate it now</label>
+        <div class="field" id="f-price-wrap" ${sel ? "" : "hidden"}><label for="f-partner" class="sub-label">Authenticator</label><span id="f-partner-wrap">${sel || `<span class="hint">No specialist is approved for this category yet.</span>`}</span><span class="hint">They check the piece in person. Once it's stamped, you can list it.</span></div>
         <p class="hint" id="f-error" style="color:var(--err);min-height:1em;margin:0 0 8px"></p>
         <button class="btn primary block" type="submit" ${state.busy ? "disabled" : ""}>Create passport</button>
       </form>`, (m) => {
       const sell = $("#f-sell", m);
       const err = $("#f-error", m);
-      if (sell) sell.addEventListener("change", () => ($("#f-price-wrap", m).hidden = !sell.checked));
+      const pickedCat = () => m.querySelector('input[name="cat"]:checked')?.value || null;
+      const updatePartners = () => { $("#f-partner-wrap", m).innerHTML = partnerSelect("f-partner", pickedCat()) || `<span class="hint">No specialist is approved for this category yet.</span>`; };
+      sell.addEventListener("change", () => ($("#f-price-wrap", m).hidden = !sell.checked));
+      m.querySelectorAll('input[name="cat"]').forEach((r) => r.addEventListener("change", updatePartners));
       $("#f-name", m).focus();
       m.querySelectorAll("[data-sample]").forEach((b) => b.addEventListener("click", () => {
         const s = SAMPLES[Number(b.dataset.sample)];
         $("#f-name", m).value = s.name; $("#f-brand", m).value = s.brand; $("#f-details", m).value = s.details;
-        const r = $(`#kind-${s.kind}`, m); if (r) r.checked = true;
+        const r = $(`#cat-${s.category}`, m); if (r) { r.checked = true; updatePartners(); }
       }));
       const setPhoto = (data) => {
         photoData = data;
         $("#f-prev", m).innerHTML = data ? `<img src="${data}" alt="Photo preview">` : "<span>No photo</span>";
         $("#f-photo-clear", m).hidden = !data;
-        $("#f-kind-wrap", m).hidden = !!data;
       };
       $("#f-photo", m).addEventListener("change", async (ev) => {
         const file = ev.target.files && ev.target.files[0];
@@ -1456,13 +1789,15 @@
         const name = $("#f-name", m).value.trim();
         const brand = $("#f-brand", m).value.trim();
         const details = $("#f-details", m).value.trim();
-        const kind = m.querySelector('input[name="kind"]:checked')?.value || "other";
-        const asking = !!(sell && sell.checked);
+        const category = pickedCat();
+        const kind = m.querySelector('input[name="cat"]:checked')?.dataset.icon || "other";
+        const asking = !!(sell && sell.checked && $("#f-partner", m));
         const partner = asking ? $("#f-partner", m).value : null;
         if (!name) { err.textContent = "Please give the piece a name."; return; }
+        if (!category) { err.textContent = "Please choose a category."; return; }
         if (!hasMoney(toWei("0.02"))) { err.textContent = "You need a few cents for the network fee. Tap “Add money”."; return; }
         closeModal();
-        const rc = await runTx({ pending: `Creating the passport for “${name}”…`, done: `“${name}” now has its passport.`, send: (c) => c.createPassport(name, brand, details, photoData || null, kind) });
+        const rc = await runTx({ pending: `Creating the passport for “${name}”…`, done: `“${name}” now has its passport.`, send: (c) => c.createPassportIn(name, brand, details, photoData || null, kind, category) });
         if (rc && asking && rc.id) {
           const id = rc.id;
           await runTx({ pending: `Asking ${nameOf(partner)} to authenticate “${name}”…`, done: `Request sent. ${nameOf(partner)} will check “${name}” in person.`, send: (c) => c.requestAuth(id, partner) });
@@ -1479,6 +1814,9 @@
     const enough = bal >= item.price + toWei("0.01");
     const capped = !isVerified(myAddr()) && item.price > NEW_MEMBER_CAP;
     const welcome = (state.me?.credits || []).find((c) => c.kind === "welcome_shipping" && !c.usedAt);
+    const q = quoteOf(item);
+    const offer = q && q.available;
+    const total = item.price + (offer ? q.fee : 0n);
     openModal("Buy this piece", `
       ${art(item)}
       <h4 class="detail-title">${esc(item.name)}</h4>
@@ -1493,11 +1831,19 @@
         </ul>
       </div>
       ${welcome && Number(ethers.formatUnits(item.price, 18)) >= (CFG.rules?.welcomeMinOrder ?? 15) ? `<div class="callout ok">Welcome gift: your first delivery is free (up to $${welcome.dollars}).</div>` : ""}
-      <div class="facts"><div class="fact"><small>Price</small><strong>${usd(item.price)}</strong></div><div class="fact"><small>Your balance</small><strong>${usd(bal)}</strong></div></div>
-      ${capped ? `<div class="callout bad">New members can buy items up to $50. Get your ID checked at a partner pawn shop to lift the limit.</div>`
+      ${offer ? `
+      <label class="check prot-check"><input id="b-protect" type="checkbox" checked> <span><b>Add 90-day protection for ${usd(q.fee)}</b><small>If a second specialist finds it's fake within 90 days of delivery, you get the full ${usd(item.price)} back. ${esc(nameOf(item.authBy))}'s bond pays first. Added right after you pay.</small></span></label>
+      ${whyPriceHtml(item, q)}` : ""}
+      <div class="facts"><div class="fact"><small>Price</small><strong>${usd(item.price)}</strong></div>${offer ? `<div class="fact"><small>With protection</small><strong>${usd(total)}</strong></div>` : ""}<div class="fact"><small>Your balance</small><strong>${usd(bal)}</strong></div></div>
+      ${capped ? `<div class="callout bad">New members can buy items up to $50. Get your ID checked at a partner authenticator to lift the limit.</div>`
         : enough ? `<button class="btn gold block" data-action="pay" data-id="${item.id}" ${state.busy ? "disabled" : ""}>Pay ${usd(item.price)}</button>`
         : `<div class="callout info">You need ${usd(item.price)} plus a cent for the network fee.</div><button class="btn primary block" data-action="add-money">Add money</button>`}
-    `);
+    `, (m) => {
+      const cb = $("#b-protect", m);
+      const btn = m.querySelector('[data-action="pay"]');
+      if (cb && btn) cb.addEventListener("change", () => { btn.textContent = cb.checked ? `Pay ${usd(item.price)}, then add protection` : `Pay ${usd(item.price)}`; });
+      if (cb && btn) btn.textContent = `Pay ${usd(item.price)}, then add protection`;
+    });
   }
 
   // ------------------------------------------------------- dispute / authenticate
@@ -1508,12 +1854,31 @@
     const reasons = ["It never arrived", "It's not as described", "I don't think it's genuine"];
     openModal("Something's wrong", `
       <p style="margin-top:0">Your ${usd(item.price)} stays held. A panel of up to 5 ID-checked members, drawn at random, will decide. ${esc(nameOf(item.partner))}, which authenticated the piece, files an inspection report as evidence.</p>
+      ${coverFor(item, myAddr()) ? `<p class="fine">Your protection starts after delivery. While your payment is still held, a dispute is the faster way to get it back.</p>` : ""}
       <div class="callout held">Opening a dispute needs a <strong>${usd(bond)} bond</strong> (5% of the price). You get it back if the panel agrees with you. If not, it pays the panel and the seller. This keeps disputes honest.</div>
       <div class="field"><label>What happened?</label>${reasons.map((r, i) => `<label class="radio"><input type="radio" name="reason" value="${esc(r)}" ${i === 1 ? "checked" : ""}> ${esc(r)}</label>`).join("")}</div>
       <div class="field"><label for="d-note">Details (optional)</label><input id="d-note" type="text" maxlength="100" placeholder="e.g. Strap is a replacement"></div>
       ${myBalance() >= bond + toWei("0.01") ? `<button class="btn primary block" data-action="dispute-send" data-id="${id}">Open dispute and post ${usd(bond)}</button>` : `<div class="callout info">You need ${usd(bond)} for the bond.</div><button class="btn primary block" data-action="add-money">Add money</button>`}
     `);
   }
+  function openClaim(coverId) {
+    const c = prot()?.covers.find((x) => x.id === coverId);
+    if (!c) return;
+    const item = itemById(c.itemId);
+    const dep = (BigInt(c.amount) * CLAIM_DEPOSIT_BPS) / 10000n;
+    const others = activePartners().filter((p) => !same(p.addr, c.shop) && specIn(p.addr, c.category));
+    openModal("This is a fake", `
+      ${item ? art(item) : ""}
+      <h4 class="detail-title">${esc(item?.name || "Piece")}</h4>
+      <p style="margin-top:0">A second ${esc(catName(c.category).toLowerCase())} specialist${others.length ? ` (${esc(others.map((p) => p.name).join(" or "))})` : ""} re-inspects the piece. ${esc(nameOf(c.shop))}, which stamped it, can't rule on its own stamp.</p>
+      <div class="callout held">Filing a claim needs a <strong>${usd(dep)} deposit</strong> (5% of the price).
+        <ul class="plain"><li>If it's fake: you get ${usd(BigInt(c.amount))} plus your deposit back. ${esc(nameOf(c.shop))}'s bond pays half, the members' pool pays half.</li>
+        <li>If it's genuine: your deposit pays the reviewer and the pool, and a rejected claim shows on your record.</li></ul></div>
+      <div class="field"><label for="c-ev">What did you find?</label><textarea id="c-ev" rows="3" maxlength="300" class="select" placeholder="e.g. A watchmaker opened the caseback: the movement isn't the one listed."></textarea></div>
+      ${myBalance() >= dep + toWei("0.01") ? `<button class="btn danger block" data-action="claim-send" data-cover="${c.id}">File claim and post ${usd(dep)}</button>` : `<div class="callout info">You need ${usd(dep)} for the deposit.</div><button class="btn primary block" data-action="add-money">Add money</button>`}
+    `);
+  }
+
   function openAuth(id) {
     const item = itemById(id);
     if (!item) return;
@@ -1521,7 +1886,7 @@
       ${art(item)}
       <h4 class="detail-title">${esc(item.name)}</h4>
       <p class="detail-brand">${esc(item.brand || "No brand")}${item.details ? ` · ${esc(item.details)}` : ""} · owner ${esc(nameOf(item.owner))}</p>
-      <p>Only stamp a piece you have inspected in person. Your shop's name goes on its passport, and you'll file the evidence if there's ever a dispute.</p>
+      <p>Only stamp a piece you have inspected in person. Your name goes on its passport, and you'll file the evidence if there's ever a dispute.${prot() && catOf(item) && specIn(myAddr(), catOf(item)) ? ` Your stamp also certifies it as ${esc(catName(catOf(item)).toLowerCase())} for protection: if it's later proven fake, your bond pays half the price.` : ""}</p>
       <div class="field"><label for="a-note">What you checked</label><input id="a-note" type="text" maxlength="120" value="Inspected in store: brand marks, serial and condition match."></div>
       <button class="btn gold block" data-action="auth-send" data-id="${id}">Stamp passport as authenticated</button>
     `);
@@ -1551,7 +1916,7 @@
     const m = memberOf(u.address);
     openModal("Check a member's ID", `
       <div class="member-card">${avatar(u.name, u.handle)}<div><h4 class="detail-title" style="margin:0">${esc(u.name)}</h4><p class="detail-brand">Code ${esc(u.handle)} · invited by ${esc(dirBy(u.invitedBy)?.name || "—")}${m ? ` · joined ${fmtDate(m.joinedAt)}` : ""}</p></div></div>
-      <div class="callout held">Only confirm after you've seen a government photo ID and the name matches <strong>${esc(u.name)}</strong>. Your shop's name is recorded on Arc as the shop that checked them. The ID itself is never stored.</div>
+      <div class="callout held">Only confirm after you've seen a government photo ID and the name matches <strong>${esc(u.name)}</strong>. Your name is recorded on Arc as the partner that checked them. The ID itself is never stored.</div>
       <label class="check"><input id="cid-ok" type="checkbox"> I checked a photo ID in person and the name matches</label>
       <button class="btn gold block" data-action="check-id-send" data-member="${esc(handle)}">Record the ID check on Arc</button>
     `);
@@ -1561,10 +1926,11 @@
     openModal("How it works on Arc", `
       <ol class="how-list">
         <li><strong>A closed community.</strong> You join only with an invite link from a member. The contract records who invited whom, and only members can trade.</li>
-        <li><strong>ID checked in person.</strong> To sell, a member shows a photo ID at a partner pawn shop. The shop records the check on Arc. New members can buy up to $50 until then.</li>
-        <li><strong>Every piece gets a passport.</strong> A pawn shop authenticates it in person before it can be listed.</li>
+        <li><strong>ID checked in person.</strong> To sell, a member shows a photo ID at a partner authenticator, which records the check on Arc. New members can buy up to $50 until then.</li>
+        <li><strong>Every piece gets a passport.</strong> A specialist in its category (watches, vintage watches, jewelry) authenticates it in person before it can be listed.</li>
         <li><strong>Payment is held, not sent.</strong> The buyer's dollars go into the contract. The seller locks a 10% deposit.</li>
-        <li><strong>Disputes go to the community.</strong> The buyer posts a 5% bond. Five ID-checked members are drawn at random, never anyone connected to the sale. The pawn shop files an inspection report. The first side to 3 votes wins, and the contract pays out. Members who voted with the outcome share 2% of the price.</li>
+        <li><strong>Disputes go to the community.</strong> The buyer posts a 5% bond. Five ID-checked members are drawn at random, never anyone connected to the sale. The authenticator files an inspection report. The first side to 3 votes wins, and the contract pays out. Members who voted with the outcome share 2% of the price.</li>
+        ${prot() ? `<li><strong>Authenticators back their stamp with money.</strong> Each stakes a bond. Buyers can add 90 days of protection after delivery, priced on Arc from the seller's record, the record of whoever invited them, and the authenticator's record in that category. If a second specialist proves a piece fake, the bond pays half and a pool funded by members pays half. This is community protection on test dollars, not a licensed product.</li>` : ""}
         <li><strong>Everyone can check.</strong> The community ledger links every action to its transaction on Arc. Track records, including how the people you invited behaved, can't be edited.</li>
         <li><strong>Why Arc.</strong> USDC is the native currency, so fees are in dollars and cost about a cent.</li>
       </ol>
@@ -1624,19 +1990,51 @@
     } catch (e) { updateToast(t, friendlyError(e), "error"); }
   }
 
+  // Admin transactions signed in the browser with MetaMask (approving partners and specialists).
+  async function adminTx(label, to, abi, fn, args) {
+    if (state.busy) return;
+    state.busy = true; render();
+    const t = toast(`${label}: confirm it in MetaMask…`, "pending");
+    try {
+      const signer = await metamaskSigner();
+      const net = await signer.provider.getNetwork();
+      if (Number(net.chainId) !== CFG.chainId) {
+        try { await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x" + CFG.chainId.toString(16) }] }); }
+        catch (_) { throw Object.assign(new Error("wrong network"), { friendly: "Switch MetaMask to Arc Testnet and try again." }); }
+      }
+      const c = new ethers.Contract(to, abi, await metamaskSigner());
+      const tx = await c[fn](...args);
+      updateToast(t, `${label}: waiting for Arc…`, "pending");
+      await tx.wait();
+      updateToast(t, `${label}: done.`, "ok", tx.hash);
+      await connect(); await refresh();
+    } catch (e) {
+      console.error(e);
+      updateToast(t, e?.code === "NO_MM" ? "Open the app in a browser with MetaMask." : mmCancelled(e) ? "Cancelled in MetaMask." : friendlyError(e), "error");
+    } finally { state.busy = false; render(); }
+  }
+
   async function adminOp(op) {
     if (state.busy) return;
     state.busy = true; render();
-    const t = toast(op === "setup" ? "Setting up the demo accounts on Arc…" : op === "seed" ? "Adding community members on Arc…" : "Playing the demo history on Arc…", "pending");
+    const t = toast(op === "setup" ? "Setting up the demo accounts on Arc…" : op === "seed" ? "Adding community members on Arc…" : op === "protection" ? "Playing the protection demo on Arc…" : "Playing the demo history on Arc…", "pending");
     try {
-      if (op === "history") {
+      if (op === "protection") {
+        let r;
+        do {
+          r = await api("/api/admin", { op: "protection" });
+          updateToast(t, `${r.done[r.done.length - 1] || "Working"}… (step ${r.step} of ${r.total})`, "pending");
+          await refresh();
+        } while (!r.finished);
+        updateToast(t, "Protection demo done: both authenticators staked bonds, members funded the pool, one fake was refunded, one claim was rejected, and one purchase is protected.", "ok");
+      } else if (op === "history") {
         let r;
         do {
           r = await api("/api/admin", { op: "history" });
           updateToast(t, `${r.done[r.done.length - 1] || "Working"}… (step ${r.step} of ${r.total})`, "pending");
           await refresh();
         } while (!r.finished);
-        updateToast(t, "Demo history done: 2 sales, 2 listings, a piece waiting at the shop, and a dispute the member panel decided.", "ok");
+        updateToast(t, "Demo history done: 2 sales, the listings, a piece waiting for an authenticator, and a dispute the member panel decided.", "ok");
       } else if (op === "setup") {
         const r = await api("/api/admin", { op: "setup" });
         updateToast(t, r.message, "ok");
@@ -1714,6 +2112,60 @@
       case "admin-setup": adminOp("setup"); break;
       case "admin-seed": adminOp("seed"); break;
       case "admin-history": adminOp("history"); break;
+      case "admin-protection": adminOp("protection"); break;
+      case "approve-spec": {
+        const x = (CFG.specialistPlan || [])[Number(el.dataset.plan)];
+        const u = x && dirBy(x.shop);
+        if (!u) return;
+        await adminTx(`Approving ${u.name} for ${catName(x.category).toLowerCase()}`, CFG.protectionAddress,
+          ["function setSpecialist(address partner, bytes32 key, bool approved, string credential)"], "setSpecialist",
+          [u.address, ethers.encodeBytes32String(x.category), true, x.credential]);
+        break;
+      }
+      case "approve-shop2": {
+        const u = dirBy("shop2");
+        if (!u) return;
+        await adminTx("Approving Second Opinion Jewelers as a partner", CFG.contractAddress,
+          ["function addPartner(address partner, string name, string city)"], "addPartner", [u.address, "Second Opinion Jewelers", "Atlanta"]);
+        break;
+      }
+      case "buy-cover": {
+        const q = quoteOf(item);
+        if (!q) return;
+        if (!hasMoney(q.fee + toWei("0.01"))) { toast(`You need ${usd(q.fee)} for protection. Tap “Add money”.`, "error"); return; }
+        await runTx({ pending: `Adding 90-day protection to “${item.name}” for ${usd(q.fee)}…`, done: `“${item.name}” is protected. The 90 days start when you confirm delivery.`, send: (c) => c.buyCover(id) });
+        break;
+      }
+      case "claim-fake": openClaim(Number(el.dataset.cover)); break;
+      case "claim-send": {
+        const ev2 = $("#c-ev")?.value.trim();
+        if (!ev2) { toast("Please say what you found.", "error"); return; }
+        closeModal();
+        await runTx({ pending: "Filing your claim and posting the deposit…", done: "Claim filed. A second specialist will re-inspect the piece.", send: (c) => c.fileClaim(Number(el.dataset.cover), ev2) });
+        break;
+      }
+      case "decide-claim": {
+        const cid = Number(el.dataset.cover);
+        const fake = el.dataset.fake === "1";
+        const ruling = $(`#rule-${cid}`)?.value.trim();
+        if (!ruling) { toast("Please write what you found.", "error"); return; }
+        await runTx({ pending: `Recording your ruling (${fake ? "fake" : "genuine"}) on Arc…`, done: fake ? "Ruled fake. The buyer has been refunded, and you earned the re-inspection fee." : "Ruled genuine. The claim is closed and you earned the re-inspection fee.", send: (c) => c.decideClaim(cid, fake, ruling) });
+        break;
+      }
+      case "stake-bond": case "withdraw-bond": case "pool-deposit": case "pool-withdraw": {
+        const inp = $(el.dataset.action.startsWith("pool") ? "#pool-amt" : "#bond-amt");
+        const amt = parseFloat(inp?.value);
+        if (!(amt > 0)) { toast("Please enter an amount above $0.", "error"); return; }
+        const a = amt.toFixed(2);
+        const map = {
+          "stake-bond": [`Adding $${a} to your bond…`, `Your bond is $${a} bigger.`, (c) => c.stakeBond(a)],
+          "withdraw-bond": [`Withdrawing $${a} of free bond…`, `$${a} is back in your account.`, (c) => c.withdrawBond(a)],
+          "pool-deposit": [`Putting $${a} into the protection pool…`, `$${a} is in the pool. You earn a share of the fees.`, (c) => c.poolDeposit(a)],
+          "pool-withdraw": [`Withdrawing $${a} from the pool…`, `$${a} is back in your account.`, (c) => c.poolWithdraw(a)],
+        }[el.dataset.action];
+        await runTx({ pending: map[0], done: map[1], send: map[2] });
+        break;
+      }
       case "view-as":
         ev.stopPropagation();
         state.viewAs = el.dataset.handle; state.view = null; state.tab = null;
@@ -1744,10 +2196,18 @@
         break;
       case "fund": fundFromTreasury(Number(el.dataset.amount)); break;
       case "buy": openBuy(id); break;
-      case "pay":
+      case "pay": {
+        const protect = !!$("#b-protect")?.checked;
         closeModal();
-        if (await runTx({ pending: `Paying ${usd(item.price)}. The money will be held…`, done: `Paid! ${usd(item.price)} is held until you confirm “${item.name}” arrived.`, send: (c) => c.buy(id) })) goTab("orders");
+        if (await runTx({ pending: `Paying ${usd(item.price)}. The money will be held…`, done: `Paid! ${usd(item.price)} is held until you confirm “${item.name}” arrived.`, send: (c) => c.buy(id) })) {
+          if (protect && quoteOf(itemById(id))?.available) {
+            const q = quoteOf(itemById(id));
+            await runTx({ pending: `Adding 90-day protection for ${usd(q.fee)}…`, done: `Protected. The 90 days start when you confirm “${item.name}” arrived.`, send: (c) => c.buyCover(id) });
+          }
+          goTab("orders");
+        }
         break;
+      }
       case "list": {
         const price = parseFloat($("#list-price")?.value);
         if (!(price > 0)) { toast("Please enter a price above $0.", "error"); return; }
@@ -1756,11 +2216,11 @@
         await runTx({ pending: `Listing “${item.name}” for ${usd(w)} and locking your ${usd(depositOf(w))} deposit…`, done: `“${item.name}” is now for sale.`, send: (c) => c.listForSale(id, w) });
         break;
       }
-      case "unlist": await runTx({ pending: "Taking it off sale…", done: `“${item.name}” is back in your wardrobe and your deposit is returned.`, send: (c) => c.cancelListing(id) }); break;
+      case "unlist": await runTx({ pending: "Taking it off sale…", done: `“${item.name}” is off sale and your deposit is returned.`, send: (c) => c.cancelListing(id) }); break;
       case "ship": closeModal(); await runTx({ pending: "Marking it as shipped…", done: `Marked as shipped. ${nameOf(item.buyer)} has ${CONFIRM_DAYS} days to confirm or dispute.`, send: (c) => c.markShipped(id) }); break;
       case "confirm":
         closeModal();
-        if (await runTx({ pending: `Releasing the payment to ${nameOf(item.owner)} and moving the passport to you…`, done: `Done! ${nameOf(item.owner)} was paid, and “${item.name}” is now in your wardrobe.`, send: (c) => c.confirmDelivery(id) })) { await connect(); goTab("mine"); }
+        if (await runTx({ pending: `Releasing the payment to ${nameOf(item.owner)} and moving the passport to you…`, done: `Done! ${nameOf(item.owner)} was paid, and “${item.name}” is now yours.`, send: (c) => c.confirmDelivery(id) })) { await connect(); goTab("mine"); }
         break;
       case "claim": closeModal(); await runTx({ pending: "Collecting the payment…", done: `You've been paid for “${item.name}”.`, send: (c) => c.sellerClaim(id) }); break;
       case "seller-cancel": closeModal(); await runTx({ pending: "Refunding the buyer…", done: "The buyer got their money back. The piece is listed again.", send: (c) => c.sellerCancelSale(id) }); break;
@@ -1770,7 +2230,7 @@
         const reason = document.querySelector('input[name="reason"]:checked')?.value || "Something's wrong";
         const note = $("#d-note")?.value.trim();
         closeModal();
-        if (await runTx({ pending: "Opening the dispute and drawing a panel of members…", done: "Dispute opened. A panel of members has been drawn and the pawn shop will file a report.", send: (c) => c.openDispute(id, note ? `${reason}: ${note}` : reason) })) goTab("disputes");
+        if (await runTx({ pending: "Opening the dispute and drawing a panel of members…", done: "Dispute opened. A panel of members has been drawn and the authenticator will file a report.", send: (c) => c.openDispute(id, note ? `${reason}: ${note}` : reason) })) goTab("disputes");
         break;
       }
       case "vote": {
@@ -1795,7 +2255,7 @@
       case "flag": {
         const reason = window.prompt("What looks off about this listing?", "Price or photos look suspicious");
         if (reason === null) return;
-        await runTx({ pending: "Flagging the listing…", done: `Flag added. At ${CFG.rules?.flagsToPause ?? 3} flags the listing pauses until the pawn shop reviews it.`, send: (c) => c.flag(id, reason) });
+        await runTx({ pending: "Flagging the listing…", done: `Flag added. At ${CFG.rules?.flagsToPause ?? 3} flags the listing pauses until the authenticator reviews it.`, send: (c) => c.flag(id, reason) });
         break;
       }
       case "unflag": await runTx({ pending: "Removing your flag…", done: "Flag removed.", send: (c) => c.unflag(id) }); break;

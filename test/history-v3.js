@@ -23,4 +23,11 @@ const URL = "http://127.0.0.1:3000";
   console.log("items", st.items.length, "listed", st.items.filter((i) => i.status === 1).length, "disputes", st.disputes.map((d) => ({ resolved: d.resolved, buyerWon: d.buyerWon, byPanel: d.decidedByPanel })), "ledger rows", st.ledger.length, "auth requests", Object.keys(st.authRequests).length);
   const again = await call("/api/admin", { op: "history" });
   console.log("rerun is a no-op:", again.finished && again.done.length === 0);
+  if (process.argv.includes("--protection")) {
+    do { r = await call("/api/admin", { op: "protection" }); console.log(`protection ${r.step}/${r.total}:`, r.done.join(" | ")); } while (!r.finished);
+    const p = (await call("/api/state")).protection;
+    console.log("covers", p.covers.map((c) => `${c.id}:${c.state}:${c.feeBps}bps`).join(" "), "pool", p.pool, "shops", JSON.stringify(p.shops));
+    console.log("rates", Object.values(p.members).map((m) => m.rate && m.rate.feeBps).join(","));
+    console.log("listed quotes", Object.entries(p.quote).map(([id, q]) => `${id}:${q.feeBps}:${q.available}`).join(" "));
+  }
 })().catch((e) => { console.error("FAILED", e.message); process.exit(1); });

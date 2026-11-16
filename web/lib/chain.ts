@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import abi from "./abi.json";
+import pabi from "./protectionAbi.json";
 import { CFG } from "./config";
 
 const g = globalThis as unknown as { __wpRpc?: ethers.JsonRpcProvider };
@@ -13,17 +14,26 @@ export function rpc(): ethers.JsonRpcProvider {
   return g.__wpRpc;
 }
 export const iface = new ethers.Interface(abi as any);
+export const piface = new ethers.Interface(pabi as any);
 export function contract(): ethers.Contract {
   if (!ethers.isAddress(CFG.contract)) throw new Error("CONTRACT_ADDRESS is not set.");
   return new ethers.Contract(CFG.contract, abi as any, rpc());
 }
+/** True when PROTECTION_ADDRESS is set. Every protection screen and action checks this. */
+export const protectionOn = () => ethers.isAddress(CFG.protection);
+export function protection(): ethers.Contract {
+  if (!protectionOn()) throw new Error("PROTECTION_ADDRESS is not set.");
+  return new ethers.Contract(CFG.protection, pabi as any, rpc());
+}
+export const catKey = (k: string) => ethers.encodeBytes32String(k);
+export const catName = (b: string) => { try { return ethers.decodeBytes32String(b); } catch { return ""; } };
 
 const FRIENDLY: Record<string, string> = {
   NotAdmin: "Only the contract's admin can do that.",
   NotOperator: "The platform wallet isn't approved to add members yet.",
   NotOwner: "Only the owner can do that.",
   NotBuyer: "Only the buyer can do that.",
-  NotPartner: "Only the pawn shop on this sale can do that.",
+  NotPartner: "Only an approved authenticator can do that.",
   NotMember: "Only community members can do that.",
   NotVerified: "Your ID needs to be checked at a partner shop before you can sell.",
   NotOnPanel: "You're not on the panel for this dispute.",
@@ -34,19 +44,39 @@ const FRIENDLY: Record<string, string> = {
   WrongStatus: "This just changed. The page has been refreshed.",
   WrongAmount: "The amount changed. The page has been refreshed.",
   InvalidPrice: "Please enter a price above $0.",
-  InvalidPartner: "That pawn shop isn't approved.",
-  PartnerExists: "That pawn shop is already approved.",
-  ConflictOfInterest: "A pawn shop can't take part in a sale it stands behind.",
+  InvalidPartner: "That authenticator isn't approved.",
+  PartnerExists: "That authenticator is already approved.",
+  ConflictOfInterest: "An authenticator can't take part in a sale it stands behind.",
   CannotBuyOwnItem: "You can't buy your own item.",
   OverNewMemberCap: "New members can buy items up to $50. Get your ID checked at a partner shop to lift the limit.",
   TooEarly: "It's too early for that. Check the date shown.",
   TooLate: "Voting on this dispute has closed.",
   PanelDecides: "The community panel is deciding this one.",
-  PartnerDecides: "The panel didn't reach a decision, so the pawn shop decides.",
+  PartnerDecides: "The panel didn't reach a decision, so the authenticator decides.",
   NothingOwed: "There's nothing to collect.",
   TransferFailed: "The payment couldn't be sent. Please try again.",
   NoSuchItem: "That item doesn't exist.",
   NoSuchDispute: "That dispute doesn't exist.",
+  // Protection contract
+  NotSpecialist: "That authenticator isn't approved for this category.",
+  NotCertified: "This piece wasn't certified by a specialist, so it can't be protected.",
+  NoSuchCategory: "That category isn't open.",
+  InSale: "The piece is in a sale right now. Try again after it settles.",
+  NotReviewer: "Only a second specialist in this category can rule on this claim.",
+  NotInSale: "Protection can only be added while your payment is held.",
+  NotAuthenticated: "This piece hasn't been authenticated.",
+  AlreadyCovered: "This purchase is already protected.",
+  WrongState: "This just changed. The page has been refreshed.",
+  ShopBondTooLow: "The authenticator's bond can't cover this piece right now.",
+  PoolTooSmall: "The protection pool is too small for this piece right now.",
+  FundsLocked: "That money is held behind live protection and can't be withdrawn yet.",
+  NotDelivered: "Protection starts once the sale completes.",
+  StillInSale: "The sale is still going.",
+  CoverEnded: "The 90 days of protection have ended.",
+  NotExpired: "This protection hasn't ended yet.",
+  NoLongerOwner: "You can only claim on a piece you still own and haven't put back on sale.",
+  NoSuchCover: "That protection doesn't exist.",
+  InvalidRate: "That rate is outside 1% to 20%.",
 };
 
 function revertData(e: any): string | null {
@@ -57,10 +87,12 @@ function revertData(e: any): string | null {
 export function friendly(e: any): string {
   const data = revertData(e);
   if (data) {
-    try {
-      const parsed = iface.parseError(data);
-      if (parsed && FRIENDLY[parsed.name]) return FRIENDLY[parsed.name];
-    } catch { /* not one of ours */ }
+    for (const f of [iface, piface]) {
+      try {
+        const parsed = f.parseError(data);
+        if (parsed && FRIENDLY[parsed.name]) return FRIENDLY[parsed.name];
+      } catch { /* not one of ours */ }
+    }
   }
   const msg = `${e?.shortMessage ?? ""} ${e?.message ?? ""} ${e?.info?.error?.message ?? ""} ${e?.error?.message ?? ""}`.toLowerCase();
   if (e?.code === "INSUFFICIENT_FUNDS" || msg.includes("insufficient funds") || msg.includes("insufficient balance")) {
@@ -74,7 +106,7 @@ const big = (v: bigint) => v.toString();
 const ZERO = /^0x0{40}$/i;
 
 /** Limit parallel RPC calls so a public node doesn't rate-limit us. */
-async function pool<T, R>(list: T[], fn: (x: T) => Promise<R>, n = 8): Promise<R[]> {
+export async function pool<T, R>(list: T[], fn: (x: T) => Promise<R>, n = 8): Promise<R[]> {
   const out: R[] = new Array(list.length);
   let i = 0;
   await Promise.all(Array.from({ length: Math.min(n, list.length) }, async () => {
@@ -153,4 +185,94 @@ export async function readState(addresses: string[]) {
   const balances: Record<string, string> = {};
   addresses.forEach((a, i) => (balances[a.toLowerCase()] = big(bals[i])));
   return { admin: adminAddr as string, items, histories, partners, members, disputes, records, balances };
+}
+
+// ------------------------------------------------------------- protection
+const g2 = globalThis as unknown as { __wpPCache?: { at: number; key: string; data: any } };
+
+/** Categories and specialists change rarely (admin transactions), so they're cached for 20 seconds. */
+async function protectionSetup(partnerAddrs: string[]) {
+  const key = partnerAddrs.join(",").toLowerCase();
+  const c = g2.__wpPCache;
+  if (c && c.key === key && Date.now() - c.at < 20_000) return c.data;
+  const p = protection();
+  const keys: string[] = await p.getCategories();
+  const cats = await pool(keys, (k) => p.categories(k));
+  const categories = keys.map((k, i) => ({ key: catName(k), name: cats[i].name, baseBps: Number(cats[i].baseBps), active: cats[i].active }));
+  const pairs: [string, string][] = [];
+  for (const a of partnerAddrs) for (const k of keys) pairs.push([a, k]);
+  const isSpec = await pool(pairs, ([a, k]) => p.specialistIn(a, k));
+  const specPairs = pairs.filter((_, i) => isSpec[i]);
+  const creds = await pool(specPairs, ([a, k]) => p.credentialOf(a, k));
+  const specialists: Record<string, Record<string, { credential: string }>> = {};
+  specPairs.forEach(([a, k], i) => { (specialists[a.toLowerCase()] ??= {})[catName(k)] = { credential: creds[i] }; });
+  const data = { categories, specialists };
+  g2.__wpPCache = { at: Date.now(), key, data };
+  return data;
+}
+export const forgetProtectionCache = () => { g2.__wpPCache = undefined; };
+
+const COVER_STATES = ["pending", "active", "claimed", "paid", "rejected", "expired", "void"];
+
+/** Bonds, the pool, covers, quotes and each member's rate, read from the protection contract. */
+export async function readProtection(chain: { items: any[]; partners: any[]; members: any[] }, people: string[]) {
+  if (!protectionOn()) return null;
+  const p = protection();
+  const partnerAddrs = chain.partners.map((x) => x.addr as string);
+  const [setup, countRaw, poolRaw] = await Promise.all([protectionSetup(partnerAddrs), p.coverCount(), p.poolStats()]);
+  const ids = chain.items.map((i) => i.id as number);
+  const quoteIds = chain.items.filter((i) => [1, 2, 3].includes(i.status)).map((i) => i.id as number);
+  const coverIds = Array.from({ length: Number(countRaw) }, (_, i) => i + 1);
+  const memberAddrs = [...new Set([...chain.members.map((m) => m.addr as string), ...people])];
+  const specCats: [string, string][] = [];
+  for (const [a, cats] of Object.entries(setup.specialists as Record<string, any>)) for (const k of Object.keys(cats)) specCats.push([a, k]);
+
+  const [catOf, quotes, covers, shopRows, fakesIn, shares, values, rates, fakesSold, rejected] = await Promise.all([
+    pool(ids, (id) => p.categoryOf(id)),
+    pool(quoteIds, (id) => p.quote(id)),
+    pool(coverIds, (id) => p.getCover(id)),
+    pool(partnerAddrs, (a) => p.shopStats(a)),
+    pool(specCats, ([a, k]) => p.fakesStampedIn(a, catKey(k))),
+    pool(memberAddrs, (a) => p.sharesOf(a)),
+    pool(memberAddrs, (a) => p.stakeValue(a)),
+    // A member's own rate as a seller: base for watches + their record + their inviter's (no authenticator part).
+    pool(memberAddrs, (a) => p.rate(a, ethers.ZeroAddress, catKey("watches")).catch(() => null)),
+    pool(memberAddrs, (a) => p.fakesSoldBy(a)),
+    pool(memberAddrs, (a) => p.claimsRejectedOf(a)),
+  ]);
+
+  const categoryOf: Record<number, string> = {};
+  catOf.forEach((k: string, i: number) => { const n = catName(k); if (n) categoryOf[ids[i]] = n; });
+  const quote: Record<number, any> = {};
+  quotes.forEach((q: any, i: number) => {
+    quote[quoteIds[i]] = {
+      fee: big(q.fee), feeBps: Number(q.feeBps), base: Number(q.base), sellerAdj: Number(q.sellerAdj), inviterAdj: Number(q.inviterAdj),
+      shopAdj: Number(q.shopAdj), available: q.available, category: catName(q.category),
+    };
+  });
+  const coverList = covers.map((c: any, i: number) => ({
+    id: coverIds[i], itemId: Number(c.itemId), buyer: c.buyer, seller: c.seller, shop: c.shop, amount: big(c.amount), fee: big(c.fee),
+    feeBps: Number(c.feeBps), paidAt: Number(c.paidAt), boughtAt: Number(c.boughtAt), deliveredAt: Number(c.deliveredAt),
+    shopLock: big(c.shopLock), poolLock: big(c.poolLock), state: COVER_STATES[Number(c.state)] ?? "pending", category: catName(c.category),
+    claimedAt: Number(c.claimedAt), claimDeposit: big(c.claimDeposit), reviewer: ZERO.test(c.reviewer) ? null : c.reviewer,
+    evidence: c.evidence, ruling: c.ruling,
+  }));
+  const shops: Record<string, any> = {};
+  shopRows.forEach((r: any, i: number) => {
+    shops[partnerAddrs[i].toLowerCase()] = { bond: big(r.bond), locked: big(r.locked), free: big(r.free), covered: Number(r.covered), fakes: Number(r.fakes), fakesIn: {} };
+  });
+  specCats.forEach(([a, k], i) => { if (shops[a]) shops[a].fakesIn[k] = Number(fakesIn[i]); });
+  const members: Record<string, any> = {};
+  memberAddrs.forEach((a, i) => {
+    const r: any = rates[i];
+    members[a.toLowerCase()] = {
+      shares: big(shares[i]), value: big(values[i]), fakesSold: Number(fakesSold[i]), claimsRejected: Number(rejected[i]),
+      rate: r ? { feeBps: Number(r.feeBps), base: Number(r.base), sellerAdj: Number(r.sellerAdj), inviterAdj: Number(r.inviterAdj) } : null,
+    };
+  });
+  const [assets, locked, free, fees, paid, totalShares] = poolRaw as any[];
+  return {
+    address: CFG.protection, categories: setup.categories, specialists: setup.specialists, categoryOf, quote, covers: coverList, shops, members,
+    pool: { assets: big(assets), locked: big(locked), free: big(free), fees: big(fees), paid: big(paid), shares: big(totalShares) },
+  };
 }

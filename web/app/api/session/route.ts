@@ -1,4 +1,4 @@
-import { CFG, RULES, SYSTEM_USERS } from "@/lib/config";
+import { CATEGORIES, CFG, RULES, SPECIALIST_PLAN, SYSTEM_USERS } from "@/lib/config";
 import { currentSession, inviteAllowance } from "@/lib/auth";
 import { q } from "@/lib/db";
 import { safely } from "@/lib/http";
@@ -13,6 +13,7 @@ export async function GET() {
     const config = {
       chainId: CFG.chainId, chainName: CFG.chainName, contractAddress: CFG.contract, explorer: CFG.explorer,
       faucet: CFG.faucet, rpcUrl: CFG.rpcUrl, walletProvider: CFG.walletProvider, emailDelivery: !!CFG.smtpUrl, rules: RULES,
+      protectionAddress: CFG.protection || null, categories: CATEGORIES, specialistPlan: SPECIALIST_PLAN,
     };
     const demo = CFG.demoSignin ? SYSTEM_USERS.filter((u) => "demo" in u).map((u: any) => ({ handle: u.handle, name: u.name, label: u.demo })) : [];
     const seeded = CFG.demoSignin

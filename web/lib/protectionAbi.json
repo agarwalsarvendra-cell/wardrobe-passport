@@ -1,0 +1,1834 @@
+[
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "passportV3",
+    "type": "address"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "constructor"
+ },
+ {
+  "inputs": [],
+  "name": "AlreadyCovered",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "CoverEnded",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "FundsLocked",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InSale",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "InvalidRate",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NoLongerOwner",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NoSuchCategory",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NoSuchCover",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotAdmin",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotAuthenticated",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotBuyer",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotCertified",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotDelivered",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotExpired",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotInSale",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotMember",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotPartner",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotReviewer",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NotSpecialist",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "NothingOwed",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "PoolTooSmall",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "Reentrancy",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "ShopBondTooLow",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "StillInSale",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "TransferFailed",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "WrongAmount",
+  "type": "error"
+ },
+ {
+  "inputs": [],
+  "name": "WrongState",
+  "type": "error"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "shop",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "total",
+    "type": "uint256"
+   }
+  ],
+  "name": "BondStaked",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "shop",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "total",
+    "type": "uint256"
+   }
+  ],
+  "name": "BondWithdrawn",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "bytes32",
+    "name": "category",
+    "type": "bytes32"
+   },
+   {
+    "indexed": false,
+    "internalType": "string",
+    "name": "name",
+    "type": "string"
+   },
+   {
+    "indexed": false,
+    "internalType": "int256",
+    "name": "baseBps",
+    "type": "int256"
+   },
+   {
+    "indexed": false,
+    "internalType": "bool",
+    "name": "active",
+    "type": "bool"
+   }
+  ],
+  "name": "CategorySet",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "itemId",
+    "type": "uint256"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "partner",
+    "type": "address"
+   },
+   {
+    "indexed": true,
+    "internalType": "bytes32",
+    "name": "category",
+    "type": "bytes32"
+   }
+  ],
+  "name": "Certified",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "coverId",
+    "type": "uint256"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "reviewer",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "bool",
+    "name": "fake",
+    "type": "bool"
+   },
+   {
+    "indexed": false,
+    "internalType": "string",
+    "name": "ruling",
+    "type": "string"
+   }
+  ],
+  "name": "ClaimDecided",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "coverId",
+    "type": "uint256"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "buyer",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "deposit",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "string",
+    "name": "evidence",
+    "type": "string"
+   }
+  ],
+  "name": "ClaimFiled",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "coverId",
+    "type": "uint256"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "buyer",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "fromShopBond",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "fromPool",
+    "type": "uint256"
+   }
+  ],
+  "name": "ClaimPaid",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "coverId",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "deliveredAt",
+    "type": "uint64"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint64",
+    "name": "expiresAt",
+    "type": "uint64"
+   }
+  ],
+  "name": "CoverActivated",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "coverId",
+    "type": "uint256"
+   },
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "itemId",
+    "type": "uint256"
+   },
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "buyer",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "address",
+    "name": "seller",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "address",
+    "name": "shop",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "bytes32",
+    "name": "category",
+    "type": "bytes32"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "fee",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint16",
+    "name": "feeBps",
+    "type": "uint16"
+   }
+  ],
+  "name": "CoverBought",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "coverId",
+    "type": "uint256"
+   }
+  ],
+  "name": "CoverExpired",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "uint256",
+    "name": "coverId",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "feeRefunded",
+    "type": "uint256"
+   }
+  ],
+  "name": "CoverVoided",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "to",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   }
+  ],
+  "name": "PayoutDeferred",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "member",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "shares",
+    "type": "uint256"
+   }
+  ],
+  "name": "PoolDeposit",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "member",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "shares",
+    "type": "uint256"
+   }
+  ],
+  "name": "PoolWithdrawal",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "partner",
+    "type": "address"
+   },
+   {
+    "indexed": true,
+    "internalType": "bytes32",
+    "name": "category",
+    "type": "bytes32"
+   },
+   {
+    "indexed": false,
+    "internalType": "bool",
+    "name": "approved",
+    "type": "bool"
+   },
+   {
+    "indexed": false,
+    "internalType": "string",
+    "name": "credential",
+    "type": "string"
+   }
+  ],
+  "name": "SpecialistSet",
+  "type": "event"
+ },
+ {
+  "anonymous": false,
+  "inputs": [
+   {
+    "indexed": true,
+    "internalType": "address",
+    "name": "to",
+    "type": "address"
+   },
+   {
+    "indexed": false,
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   }
+  ],
+  "name": "Withdrawn",
+  "type": "event"
+ },
+ {
+  "inputs": [],
+  "name": "CLAIM_DEPOSIT_BPS",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "COVER_WINDOW",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "DISPUTE_LOST_LOADING",
+  "outputs": [
+   {
+    "internalType": "int256",
+    "name": "",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "INVITER_LOADING",
+  "outputs": [
+   {
+    "internalType": "int256",
+    "name": "",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "MAX_BPS",
+  "outputs": [
+   {
+    "internalType": "int256",
+    "name": "",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "MAX_INVITER_LOADING",
+  "outputs": [
+   {
+    "internalType": "int256",
+    "name": "",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "MAX_SALE_CREDIT",
+  "outputs": [
+   {
+    "internalType": "int256",
+    "name": "",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "MIN_BPS",
+  "outputs": [
+   {
+    "internalType": "int256",
+    "name": "",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "NEW_SELLER_LOADING",
+  "outputs": [
+   {
+    "internalType": "int256",
+    "name": "",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "REFUND_LOADING",
+  "outputs": [
+   {
+    "internalType": "int256",
+    "name": "",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "REVIEW_FEE_BPS",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "REVIEW_WINDOW",
+  "outputs": [
+   {
+    "internalType": "uint64",
+    "name": "",
+    "type": "uint64"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "SALE_CREDIT",
+  "outputs": [
+   {
+    "internalType": "int256",
+    "name": "",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "SELLER_FAKE_LOADING",
+  "outputs": [
+   {
+    "internalType": "int256",
+    "name": "",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "SHOP_CLEAN_CREDIT",
+  "outputs": [
+   {
+    "internalType": "int256",
+    "name": "",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "SHOP_CLEAN_MIN_STAMPS",
+  "outputs": [
+   {
+    "internalType": "uint32",
+    "name": "",
+    "type": "uint32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "SHOP_FAKE_LOADING",
+  "outputs": [
+   {
+    "internalType": "int256",
+    "name": "",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "SHOP_SHARE_BPS",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   }
+  ],
+  "name": "activate",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "bondLocked",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "bondOf",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "itemId",
+    "type": "uint256"
+   }
+  ],
+  "name": "buyCover",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "name": "categories",
+  "outputs": [
+   {
+    "internalType": "string",
+    "name": "name",
+    "type": "string"
+   },
+   {
+    "internalType": "int256",
+    "name": "baseBps",
+    "type": "int256"
+   },
+   {
+    "internalType": "bool",
+    "name": "active",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "name": "categoryOf",
+  "outputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "itemId",
+    "type": "uint256"
+   },
+   {
+    "internalType": "bytes32",
+    "name": "key",
+    "type": "bytes32"
+   }
+  ],
+  "name": "certify",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "claimsPaid",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "claimsRejectedOf",
+  "outputs": [
+   {
+    "internalType": "uint32",
+    "name": "",
+    "type": "uint32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "coverCount",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "itemId",
+    "type": "uint256"
+   },
+   {
+    "internalType": "address",
+    "name": "buyer",
+    "type": "address"
+   },
+   {
+    "internalType": "uint64",
+    "name": "paidAt",
+    "type": "uint64"
+   }
+  ],
+  "name": "coverFor",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "name": "coverOfSale",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   },
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "name": "credentialOf",
+  "outputs": [
+   {
+    "internalType": "string",
+    "name": "",
+    "type": "string"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   },
+   {
+    "internalType": "bool",
+    "name": "fake",
+    "type": "bool"
+   },
+   {
+    "internalType": "string",
+    "name": "ruling",
+    "type": "string"
+   }
+  ],
+  "name": "decideClaim",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "depositToPool",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "shares",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   }
+  ],
+  "name": "expire",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256[]",
+    "name": "ids",
+    "type": "uint256[]"
+   }
+  ],
+  "name": "expireMany",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "fakesSoldBy",
+  "outputs": [
+   {
+    "internalType": "uint32",
+    "name": "",
+    "type": "uint32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "fakesStampedBy",
+  "outputs": [
+   {
+    "internalType": "uint32",
+    "name": "",
+    "type": "uint32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   },
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "name": "fakesStampedIn",
+  "outputs": [
+   {
+    "internalType": "uint32",
+    "name": "",
+    "type": "uint32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "feesEarned",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   },
+   {
+    "internalType": "string",
+    "name": "evidence",
+    "type": "string"
+   }
+  ],
+  "name": "fileClaim",
+  "outputs": [],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "shop",
+    "type": "address"
+   }
+  ],
+  "name": "freeBond",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "freePool",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "getCategories",
+  "outputs": [
+   {
+    "internalType": "bytes32[]",
+    "name": "",
+    "type": "bytes32[]"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   }
+  ],
+  "name": "getCover",
+  "outputs": [
+   {
+    "components": [
+     {
+      "internalType": "uint256",
+      "name": "itemId",
+      "type": "uint256"
+     },
+     {
+      "internalType": "address",
+      "name": "buyer",
+      "type": "address"
+     },
+     {
+      "internalType": "address",
+      "name": "seller",
+      "type": "address"
+     },
+     {
+      "internalType": "address",
+      "name": "shop",
+      "type": "address"
+     },
+     {
+      "internalType": "uint256",
+      "name": "amount",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "fee",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint16",
+      "name": "feeBps",
+      "type": "uint16"
+     },
+     {
+      "internalType": "uint64",
+      "name": "paidAt",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "boughtAt",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint64",
+      "name": "deliveredAt",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint256",
+      "name": "shopLock",
+      "type": "uint256"
+     },
+     {
+      "internalType": "uint256",
+      "name": "poolLock",
+      "type": "uint256"
+     },
+     {
+      "internalType": "enum WardrobeProtection.State",
+      "name": "state",
+      "type": "uint8"
+     },
+     {
+      "internalType": "bytes32",
+      "name": "category",
+      "type": "bytes32"
+     },
+     {
+      "internalType": "uint64",
+      "name": "claimedAt",
+      "type": "uint64"
+     },
+     {
+      "internalType": "uint256",
+      "name": "claimDeposit",
+      "type": "uint256"
+     },
+     {
+      "internalType": "address",
+      "name": "reviewer",
+      "type": "address"
+     },
+     {
+      "internalType": "string",
+      "name": "evidence",
+      "type": "string"
+     },
+     {
+      "internalType": "string",
+      "name": "ruling",
+      "type": "string"
+     }
+    ],
+    "internalType": "struct WardrobeProtection.Cover",
+    "name": "",
+    "type": "tuple"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "owed",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "passport",
+  "outputs": [
+   {
+    "internalType": "contract IWardrobePassportV3",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "poolAssets",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "poolLocked",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "poolStats",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "assets",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "locked",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "free",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "fees",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "paid",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "shares",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "itemId",
+    "type": "uint256"
+   }
+  ],
+  "name": "quote",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "fee",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint16",
+    "name": "feeBps",
+    "type": "uint16"
+   },
+   {
+    "internalType": "int256",
+    "name": "base",
+    "type": "int256"
+   },
+   {
+    "internalType": "int256",
+    "name": "sellerAdj",
+    "type": "int256"
+   },
+   {
+    "internalType": "int256",
+    "name": "inviterAdj",
+    "type": "int256"
+   },
+   {
+    "internalType": "int256",
+    "name": "shopAdj",
+    "type": "int256"
+   },
+   {
+    "internalType": "bool",
+    "name": "available",
+    "type": "bool"
+   },
+   {
+    "internalType": "bytes32",
+    "name": "category",
+    "type": "bytes32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "seller",
+    "type": "address"
+   },
+   {
+    "internalType": "address",
+    "name": "shop",
+    "type": "address"
+   },
+   {
+    "internalType": "bytes32",
+    "name": "category",
+    "type": "bytes32"
+   }
+  ],
+  "name": "rate",
+  "outputs": [
+   {
+    "internalType": "uint16",
+    "name": "feeBps",
+    "type": "uint16"
+   },
+   {
+    "internalType": "int256",
+    "name": "base",
+    "type": "int256"
+   },
+   {
+    "internalType": "int256",
+    "name": "sellerAdj",
+    "type": "int256"
+   },
+   {
+    "internalType": "int256",
+    "name": "inviterAdj",
+    "type": "int256"
+   },
+   {
+    "internalType": "int256",
+    "name": "shopAdj",
+    "type": "int256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "bytes32",
+    "name": "key",
+    "type": "bytes32"
+   },
+   {
+    "internalType": "string",
+    "name": "name",
+    "type": "string"
+   },
+   {
+    "internalType": "int256",
+    "name": "baseBps",
+    "type": "int256"
+   },
+   {
+    "internalType": "bool",
+    "name": "active",
+    "type": "bool"
+   }
+  ],
+  "name": "setCategory",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "partner",
+    "type": "address"
+   },
+   {
+    "internalType": "bytes32",
+    "name": "key",
+    "type": "bytes32"
+   },
+   {
+    "internalType": "bool",
+    "name": "approved",
+    "type": "bool"
+   },
+   {
+    "internalType": "string",
+    "name": "credential",
+    "type": "string"
+   }
+  ],
+  "name": "setSpecialist",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "sharesOf",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "shop",
+    "type": "address"
+   }
+  ],
+  "name": "shopStats",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "bond",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "locked",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "free",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint32",
+    "name": "covered",
+    "type": "uint32"
+   },
+   {
+    "internalType": "uint32",
+    "name": "fakes",
+    "type": "uint32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   },
+   {
+    "internalType": "bytes32",
+    "name": "",
+    "type": "bytes32"
+   }
+  ],
+  "name": "specialistIn",
+  "outputs": [
+   {
+    "internalType": "bool",
+    "name": "",
+    "type": "bool"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "stakeBond",
+  "outputs": [],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "member",
+    "type": "address"
+   }
+  ],
+  "name": "stakeValue",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "address",
+    "name": "",
+    "type": "address"
+   }
+  ],
+  "name": "stampsCovered",
+  "outputs": [
+   {
+    "internalType": "uint32",
+    "name": "",
+    "type": "uint32"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "totalShares",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "view",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "id",
+    "type": "uint256"
+   }
+  ],
+  "name": "voidCover",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [],
+  "name": "withdraw",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   }
+  ],
+  "name": "withdrawBond",
+  "outputs": [],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "shares",
+    "type": "uint256"
+   }
+  ],
+  "name": "withdrawFromPool",
+  "outputs": [
+   {
+    "internalType": "uint256",
+    "name": "amount",
+    "type": "uint256"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ }
+]

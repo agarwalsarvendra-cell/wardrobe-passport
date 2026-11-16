@@ -5,6 +5,8 @@ export const CFG = {
   circleBlockchain: "ARC-TESTNET",
   rpcUrl: process.env.ARC_RPC_URL ?? "https://rpc.testnet.arc.io",
   contract: process.env.CONTRACT_ADDRESS ?? "",
+  // WardrobeProtection (bonded authentication + risk-priced cover). Empty: every protection screen stays hidden.
+  protection: process.env.PROTECTION_ADDRESS ?? "",
   explorer: "https://explorer.testnet.arc.io",
   faucet: "https://faucet.circle.com",
   walletProvider: (process.env.WALLET_PROVIDER ?? "local") as "local" | "circle",
@@ -35,7 +37,8 @@ export const RULES = {
 export const SYSTEM_USERS = [
   { handle: "maya", name: "Maya", role: "member", demo: "Seller" },
   { handle: "alex", name: "Alex", role: "member", demo: "Buyer", invitedBy: "maya" },
-  { handle: "shop", name: "Demo Pawn Shop", role: "partner", demo: "Pawn shop", city: "Atlanta" },
+  { handle: "shop", name: "Demo Pawn Shop", role: "partner", demo: "Authenticator", city: "Atlanta" },
+  { handle: "shop2", name: "Second Opinion Jewelers", role: "partner", demo: "Second authenticator", city: "Atlanta" },
   { handle: "treasury", name: "Platform treasury", role: "treasury" },
 ] as const;
 
@@ -47,21 +50,58 @@ export const SEED_INVITER: Record<string, string> = {
   Aisha: "Jordan", Tom: "Sam", Grace: "Priya", Diego: "Elena", Kofi: "Marcus",
 };
 
+/** Categories in the protection contract (bytes32 keys). The icon is used when a piece has no photo. */
+export const CATEGORIES = [
+  { key: "watches", name: "Watches", icon: "watch" },
+  { key: "vintage-watches", name: "Vintage watches", icon: "watch" },
+  { key: "jewelry", name: "Jewelry", icon: "ring" },
+  { key: "handbags", name: "Handbags", icon: "bag" },
+] as const;
+
+/** Which partner is approved for which category, and why. The admin approves these on the protection contract. */
+export const SPECIALIST_PLAN = [
+  { shop: "shop", category: "watches", credential: "Certified watchmaker, 20 years at the bench" },
+  { shop: "shop", category: "jewelry", credential: "GIA-trained jewelry buyer, tests gold and stones in store" },
+  { shop: "shop2", category: "watches", credential: "Certified watchmaker (WOSTEP)" },
+  { shop: "shop2", category: "vintage-watches", credential: "Vintage watch restorer, movements and dials" },
+  { shop: "shop2", category: "jewelry", credential: "Graduate gemologist (GIA)" },
+] as const;
+
 /** Demo history, run by the admin once: real transactions on Arc so the community isn't empty. */
 export const SEED_HISTORY = [
-  { key: "A", photo: "trench.jpg", seller: "Priya", buyer: "Jordan", name: "Trench coat", brand: "Burberry", details: "Size M, honey colour", icon: "jacket", price: 6, end: "confirm" },
-  { key: "B", photo: "seiko.jpg", seller: "Sam", buyer: "Elena", name: "Seiko 5 automatic", brand: "Seiko", details: "SNK809, new strap", icon: "watch", price: 7, end: "confirm" },
-  { key: "C", photo: "coach-bag.jpg", seller: "Marcus", buyer: "Aisha", name: "Tabby shoulder bag", brand: "Coach", details: "Black pebbled leather", icon: "bag", price: 5, end: "dispute" },
-  { key: "D", photo: "levis-jacket.jpg", seller: "Grace", buyer: null, name: "Trucker jacket", brand: "Levi's", details: "Size L, vintage wash", icon: "jacket", price: 6, end: "list" },
-  { key: "E", photo: "nike-dunk.jpg", seller: "Tom", buyer: null, name: "Dunk Low", brand: "Nike", details: "US 10, worn once", icon: "shoes", price: 4, end: "list" },
-  { key: "F", photo: "scarf.jpg", seller: "Kofi", buyer: null, name: "Silk scarf", brand: "Hermès", details: "90 cm, with box", icon: "other", price: 0, end: "request" },
-  { key: "G", photo: "dress.jpg", seller: "Elena", buyer: null, name: "Linen summer dress", brand: "Reformation", details: "Size S, sage green", icon: "dress", price: 5, end: "list" },
-  { key: "H", photo: "oxford.jpg", seller: "Diego", buyer: null, name: "Oxford shirt", brand: "Ralph Lauren", details: "Size M, white", icon: "top", price: 3, end: "list" },
-  { key: "I", photo: "chinos.jpg", seller: "Jordan", buyer: null, name: "Pleated chinos", brand: "Uniqlo", details: "32 x 30, navy", icon: "trousers", price: 2, end: "list" },
-  { key: "J", photo: "crossbody.jpg", seller: "Aisha", buyer: null, name: "Leather crossbody", brand: "Fossil", details: "Tan, barely used", icon: "bag", price: 4, end: "list" },
-  { key: "K", photo: "field-watch.jpg", seller: "Sam", buyer: null, name: "Field watch", brand: "Timex", details: "Khaki, 38 mm", icon: "watch", price: 5, end: "list" },
-  { key: "L", photo: "overcoat.jpg", seller: "Priya", buyer: null, name: "Wool overcoat", brand: "Zara", details: "Size S, camel", icon: "jacket", price: 5, end: "list" },
-  { key: "M", photo: "runners.jpg", seller: "Kofi", buyer: null, name: "990 running shoes", brand: "New Balance", details: "US 9, light wear", icon: "shoes", price: 4, end: "list" },
-  { key: "N", photo: "tee.jpg", seller: "Marcus", buyer: null, name: "Graphic tee", brand: "Stüssy", details: "Size L, black", icon: "top", price: 2, end: "list" },
-  { key: "O", photo: "aviators.jpg", seller: "Tom", buyer: null, name: "Aviator sunglasses", brand: "Ray-Ban", details: "Gold frame, with case", icon: "other", price: 4, end: "list" },
+  { key: "A", photo: "seiko.jpg", seller: "Priya", buyer: "Jordan", name: "Seiko 5 automatic", brand: "Seiko", details: "SNK809, new strap", icon: "watch", category: "watches", price: 6, end: "confirm" },
+  { key: "B", photo: "bangle.jpg", seller: "Sam", buyer: "Elena", name: "Sterling silver bangle", brand: "Tiffany & Co.", details: "With pouch and box", icon: "ring", category: "jewelry", price: 7, end: "confirm" },
+  { key: "C", photo: "khaki-field.jpg", seller: "Marcus", buyer: "Aisha", name: "Khaki Field mechanical", brand: "Hamilton", details: "38 mm, box and papers", icon: "watch", category: "watches", price: 5, end: "dispute" },
+  { key: "D", photo: "seamaster.jpg", seller: "Grace", buyer: null, name: "Seamaster De Ville (1968)", brand: "Omega", details: "Calibre 565, serviced 2024", icon: "watch", category: "vintage-watches", price: 9, end: "list" },
+  { key: "E", photo: "prx.jpg", seller: "Tom", buyer: null, name: "PRX quartz", brand: "Tissot", details: "40 mm, steel bracelet", icon: "watch", category: "watches", price: 6, end: "list" },
+  { key: "F", photo: "pearls.jpg", seller: "Kofi", buyer: null, name: "Pearl stud earrings", brand: "Mikimoto", details: "Akoya, 7 mm, with box", icon: "ring", category: "jewelry", price: 0, end: "request" },
+  { key: "G", photo: "chain.jpg", seller: "Elena", buyer: null, name: "Gold chain necklace", brand: "Mejuri", details: "14k, 18 inch", icon: "ring", category: "jewelry", price: 5, end: "list" },
+  { key: "H", photo: "conquest.jpg", seller: "Diego", buyer: null, name: "Conquest automatic (1972)", brand: "Longines", details: "Original dial and crown", icon: "watch", category: "vintage-watches", price: 8, end: "list" },
+  { key: "I", photo: "pendant.jpg", seller: "Jordan", buyer: null, name: "Solitaire pendant", brand: "Blue Nile", details: "0.25 ct, with grading report", icon: "ring", category: "jewelry", price: 7, end: "list" },
+  { key: "J", photo: "signet.jpg", seller: "Aisha", buyer: null, name: "Signet ring", brand: "Monica Vinader", details: "Gold vermeil, size 8", icon: "ring", category: "jewelry", price: 4, end: "list" },
+  { key: "K", photo: "timex.jpg", seller: "Sam", buyer: null, name: "Expedition field watch", brand: "Timex", details: "Khaki, 38 mm", icon: "watch", category: "watches", price: 4, end: "list" },
+  { key: "L", photo: "bracelet.jpg", seller: "Priya", buyer: null, name: "Tennis bracelet", brand: "Pandora", details: "Silver, 7 inch", icon: "ring", category: "jewelry", price: 5, end: "list" },
+  { key: "M", photo: "promaster.jpg", seller: "Kofi", buyer: null, name: "Promaster diver", brand: "Citizen", details: "Eco-Drive, 44 mm", icon: "watch", category: "watches", price: 6, end: "list" },
+  { key: "N", photo: "gshock.jpg", seller: "Marcus", buyer: null, name: "G-Shock DW-5600", brand: "Casio", details: "Black resin, like new", icon: "watch", category: "watches", price: 2, end: "list" },
+  { key: "O", photo: "speedmaster.jpg", seller: "Tom", buyer: null, name: "Speedmaster Professional (1979)", brand: "Omega", details: "Hesalite crystal, calibre 861", icon: "watch", category: "vintage-watches", price: 10, end: "list" },
 ] as const;
+
+/**
+ * Protection demo (Admin → Setup → "Play protection demo"): bonds, a member-funded pool,
+ * one covered piece proven fake, one claim rejected as genuine, and one live cover.
+ * Prices are small so the demo runs on faucet money.
+ */
+export const PROTECTION_DEMO = {
+  bonds: { shop: 10, shop2: 10 },                  // dollars each authenticator stakes
+  stakers: [["Grace", 3], ["Diego", 3], ["Kofi", 3]] as [string, number][],
+  sales: [
+    // Proven fake: stamped by Demo Pawn Shop, re-inspected by Second Opinion Jewelers.
+    { key: "P1", seller: "Tom", buyer: "Grace", shop: "shop", name: "Submariner-style diver", brand: "Unbranded", details: "Sold as a Seiko mod, 40 mm", icon: "watch", category: "watches", price: 4,
+      claim: "A watchmaker opened the caseback: the movement is a clone, not the one listed.", fake: true, ruling: "Movement is a copy of the NH35. Not what was authenticated. Fake." },
+    // Rejected claim: stamped by Second Opinion Jewelers, Demo Pawn Shop rules it genuine.
+    { key: "P2", seller: "Elena", buyer: "Diego", shop: "shop2", name: "Gold hoop earrings", brand: "Mejuri", details: "14k solid gold", icon: "ring", category: "jewelry", price: 3,
+      claim: "The clasp looks plated to me.", fake: false, ruling: "Acid test and hallmark match 14k solid gold. Genuine." },
+    // Live cover with days left.
+    { key: "P3", seller: "Sam", buyer: "Priya", shop: "shop", name: "Seiko Presage cocktail", brand: "Seiko", details: "SRPB43, 40 mm", icon: "watch", category: "watches", price: 3 },
+  ],
+} as const;

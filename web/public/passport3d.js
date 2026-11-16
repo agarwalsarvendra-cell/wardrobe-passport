@@ -6,11 +6,11 @@ import * as THREE from "./vendor/three.module.min.js";
 
 const BENEFITS = [
   { icon: "people", title: "Vouched-for members", line: "Invite-only, and every ID is checked in person." },
-  { icon: "shield", title: "Checked in person", line: "A pawn shop authenticates every piece before it's listed." },
+  { icon: "shield", title: "Checked by a specialist", line: "A watch or jewelry specialist authenticates every piece in person." },
   { icon: "lock", title: "Your money is held", line: "The seller is paid only after you confirm it arrived." },
   { icon: "scale", title: "Fair disputes", line: "Five random members vote. The contract pays out." },
   { icon: "history", title: "History adds value", line: "Every owner and price stays with the piece forever." },
-  { icon: "gift", title: "Free first delivery", line: "Plus $5 credit for each friend who joins and buys." },
+  { icon: "gift", title: "Bond-backed stamps", line: "Authenticators stake money. If they're wrong, they pay." },
 ];
 const ICON = {
   people: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c.7-3.4 3-5.2 6-5.2s5.3 1.8 6 5.2"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.6c2.6.2 4.4 1.9 5 5.4"/>',
@@ -21,7 +21,7 @@ const ICON = {
   gift: '<rect x="3" y="9" width="18" height="12" rx="2"/><path d="M12 9v12M3 13h18M12 9c-2-4-7-4-6-1s6 1 6 1 5 2 6-1-4-3-6 1"/>',
 };
 // Jacket outline from the app's icon set (64x64 viewBox), drawn on the card.
-const JACKET = "M22 8 10 13 6 56h10l2-26v28h28V30l2 26h10L54 13 42 8 32 30z M22 8l5 16-3 4 8 12 8-12-3-4 5-16";
+const WATCH = "M24 18V4h16v14 M24 46v14h16V46 M18 32a14 14 0 1 0 28 0a14 14 0 1 0 -28 0 M32 32v-8 M32 32l6 3 M46 30h3v4h-3";
 
 const ROSE = "#F0435A", INK = "#222222", MUTED = "#6A6A6A";
 const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -50,12 +50,11 @@ function frontTexture() {
   g.font = FONT(700, 46); g.textAlign = "right"; g.fillText("No. 4", 954, 120); g.textAlign = "left";
   roundRect(g, 70, 250, 884, 600, 40); g.fillStyle = "#F3EDE4"; g.fill();
   g.save(); g.translate(512 - 220, 300); g.scale(6.9, 6.9);
-  g.strokeStyle = INK; g.lineWidth = 1.7; g.lineJoin = "round"; g.lineCap = "round"; g.stroke(new Path2D(JACKET));
-  g.beginPath(); g.arc(32, 47, 1.5, 0, 7); g.arc(32, 53, 1.5, 0, 7); g.fillStyle = INK; g.fill();
+  g.strokeStyle = INK; g.lineWidth = 1.7; g.lineJoin = "round"; g.lineCap = "round"; g.stroke(new Path2D(WATCH));
   g.restore();
-  g.fillStyle = INK; g.font = FONT(800, 84); g.fillText("Trucker jacket", 70, 990);
-  g.fillStyle = MUTED; g.font = FONT(600, 52); g.fillText("Levi's · size L", 70, 1066);
-  g.fillStyle = INK; g.font = FONT(800, 56); g.fillText("$6.00", 70, 1230);
+  g.fillStyle = INK; g.font = FONT(800, 84); g.fillText("Seamaster (1968)", 70, 990);
+  g.fillStyle = MUTED; g.font = FONT(600, 52); g.fillText("Omega · calibre 565", 70, 1066);
+  g.fillStyle = INK; g.font = FONT(800, 56); g.fillText("$9.00", 70, 1230);
   g.fillStyle = MUTED; g.font = FONT(600, 40); g.fillText("2 owners", 70, 1290);
   g.save(); g.translate(790, 1210); g.rotate(-0.2);
   g.strokeStyle = ROSE; g.lineWidth = 12; g.beginPath(); g.arc(0, 0, 140, 0, Math.PI * 2); g.stroke();
@@ -70,7 +69,7 @@ function backTexture() {
   const g = c.getContext("2d"); g.scale(S, S);
   g.fillStyle = "#FFF7F8"; g.fillRect(0, 0, 1024, 1400);
   g.fillStyle = INK; g.font = FONT(800, 74); g.fillText("History", 70, 160);
-  const rows = ["Passport issued", "Checked in person", "Listed for $6", "Money held", "Sold to new owner"];
+  const rows = ["Passport issued", "Checked by a specialist", "Listed for $9", "Money held", "Protected 90 days"];
   rows.forEach((a, i) => {
     const y = 330 + i * 220;
     g.fillStyle = i < 2 ? ROSE : INK; g.beginPath(); g.arc(104, y - 18, 22, 0, Math.PI * 2); g.fill();

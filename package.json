@@ -7,7 +7,10 @@
     "test": "node test/run-tests.js",
     "test:v3": "node test/run-tests-v3.js",
     "devchain": "node test/devchain.js",
-    "serve": "python -m http.server 8080 --directory app"
+    "serve": "python -m http.server 8080 --directory app",
+    "test:protection": "node test/run-tests-protection.js",
+    "test:streams": "node test/streams-v3.js",
+    "abi:protection": "node test/build-protection-abi.js"
   },
   "devDependencies": {
     "ethers": "^6.17.0",

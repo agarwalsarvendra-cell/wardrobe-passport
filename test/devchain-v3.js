@@ -8,9 +8,9 @@ const ganache = require("ganache");
 const { ethers } = require("ethers");
 
 (async () => {
-  const src = fs.readFileSync(path.join(__dirname, "..", "contracts", "WardrobePassportV3.sol"), "utf8");
+  const read = (f) => fs.readFileSync(path.join(__dirname, "..", "contracts", f), "utf8");
   const out = JSON.parse(solc.compile(JSON.stringify({
-    language: "Solidity", sources: { "V3.sol": { content: src } },
+    language: "Solidity", sources: { "V3.sol": { content: read("WardrobePassportV3.sol") }, "P.sol": { content: read("WardrobeProtection.sol") } },
     settings: { optimizer: { enabled: true, runs: 200 }, evmVersion: "paris", outputSelection: { "*": { "*": ["abi", "evm.bytecode.object"] } } },
   })));
   const art = out.contracts["V3.sol"].WardrobePassportV3;
@@ -30,8 +30,24 @@ const { ethers } = require("ethers");
   await (await c.addPartner(shop, "Demo Pawn Shop", "Atlanta")).wait();
   await (await signer.sendTransaction({ to: treasury, value: ethers.parseUnits("500", 18) })).wait();
   await (await signer.sendTransaction({ to: shop, value: ethers.parseUnits("5", 18) })).wait();
+  // Protection (the Remix steps on Arc): deploy next to V3, approve the second shop, approve specialists.
+  let protection = "";
+  if (process.env.NO_PROTECTION !== "1") {
+    const pArt = out.contracts["P.sol"].WardrobeProtection;
+    const p = await new ethers.ContractFactory(pArt.abi, pArt.evm.bytecode.object, signer).deploy(address);
+    await p.waitForDeployment();
+    protection = await p.getAddress();
+    const shop2 = new ethers.Wallet(key("shop2")).address;
+    await (await c.addPartner(shop2, "Second Opinion Jewelers", "Atlanta")).wait();
+    await (await signer.sendTransaction({ to: shop2, value: ethers.parseUnits("5", 18) })).wait();
+    if (process.env.NO_SPECIALISTS !== "1") {
+      const plan = [["shop", "watches", "Certified watchmaker, 20 years at the bench"], ["shop", "jewelry", "GIA-trained jewelry buyer, tests gold and stones in store"],
+        ["shop2", "watches", "Certified watchmaker (WOSTEP)"], ["shop2", "vintage-watches", "Vintage watch restorer, movements and dials"], ["shop2", "jewelry", "Graduate gemologist (GIA)"]];
+      for (const [h, cat, cred] of plan) await (await p.setSpecialist(new ethers.Wallet(key(h)).address, ethers.encodeBytes32String(cat), true, cred)).wait();
+    }
+  }
   const accounts = await provider.send("eth_accounts", []);
   const initial = server.provider.getInitialAccounts();
-  fs.writeFileSync(path.join(__dirname, ".devchain.json"), JSON.stringify({ address, funder: accounts[0], adminKey: initial[accounts[0].toLowerCase()].secretKey }));
-  console.log("devchain v3 ready", address);
+  fs.writeFileSync(path.join(__dirname, ".devchain.json"), JSON.stringify({ address, protection, funder: accounts[0], adminKey: initial[accounts[0].toLowerCase()].secretKey }));
+  console.log("devchain v3 ready", address, "protection", protection);
 })();

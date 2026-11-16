@@ -91,6 +91,26 @@ create table if not exists flags (
   created_at timestamptz not null default now(),
   primary key (item_id, handle)
 );
+create table if not exists piece_meta (
+  item_id bigint primary key,
+  category text not null,
+  set_by text,
+  created_at timestamptz not null default now()
+);
+create table if not exists chain_events (
+  tx_hash text not null,
+  log_index integer not null,
+  block_number bigint not null,
+  block_time timestamptz not null,
+  event text not null,
+  args jsonb not null default '{}'::jsonb,
+  received_at timestamptz not null default now(),
+  primary key (tx_hash, log_index)
+);
+alter table chain_events add column if not exists contract text;
+create index if not exists chain_events_block on chain_events (block_number desc);
+alter table piece_meta enable row level security;
+alter table chain_events enable row level security
 `;
 
 const g = globalThis as unknown as { __wpDb?: Promise<Db> };
