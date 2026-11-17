@@ -231,12 +231,12 @@ const g3 = globalThis as unknown as { __wpProt?: { at: number; data: any } };
  * readProtection, but it never breaks the page: a result is reused for a few seconds
  * (the screens poll), and if Arc refuses the read the last good result is shown.
  */
-export async function readProtectionSafe(chain: { items: any[]; partners: any[]; members: any[] }, people: string[]) {
+export async function readProtectionSafe(chain: { items: any[]; partners: any[]; members: any[]; records: Record<string, any> }, people: string[], meta: Record<number, string> = {}) {
   if (!protectionOn()) return null;
   const c = g3.__wpProt;
   if (c && Date.now() - c.at < 4_000) return c.data;
   try {
-    const data = await readProtection(chain, people);
+    const data = await readProtection(chain, people, meta);
     g3.__wpProt = { at: Date.now(), data };
     return data;
   } catch (e) {
@@ -250,35 +250,62 @@ export const forgetProtection = () => { g3.__wpProt = undefined; };
 const COVER_STATES = ["pending", "active", "claimed", "paid", "rejected", "expired", "void"];
 
 /** Bonds, the pool, covers, quotes and each member's rate, read from the protection contract. */
-export async function readProtection(chain: { items: any[]; partners: any[]; members: any[] }, people: string[]) {
+export async function readProtection(
+  chain: { items: any[]; partners: any[]; members: any[]; records: Record<string, any> },
+  people: string[],
+  meta: Record<number, string> = {},
+) {
   if (!protectionOn()) return null;
   const p = protection();
   const partnerAddrs = chain.partners.map((x) => x.addr as string);
-  const [setup, countRaw, poolRaw] = await Promise.all([protectionSetup(partnerAddrs), p.coverCount(), p.poolStats()]);
-  const ids = chain.items.map((i) => i.id as number);
-  const quoteIds = chain.items.filter((i) => [1, 2, 3].includes(i.status)).map((i) => i.id as number);
+  const [setup, countRaw, poolRaw] = await Promise.all([protectionSetup(partnerAddrs), retry(() => p.coverCount()), retry(() => p.poolStats())]);
+  // Only pieces added with a category can be certified, so older pieces cost no reads.
+  const withCat = chain.items.filter((i) => meta[i.id]);
+  const quoteIds = withCat.filter((i) => [1, 2, 3].includes(i.status)).map((i) => i.id as number);
+  const ids = withCat.filter((i) => !quoteIds.includes(i.id)).map((i) => i.id as number); // a quote already carries the category
   const coverIds = Array.from({ length: Number(countRaw) }, (_, i) => i + 1);
   const memberAddrs = [...new Set([...chain.members.map((m) => m.addr as string), ...people])];
   const specCats: [string, string][] = [];
   for (const [a, cats] of Object.entries(setup.specialists as Record<string, any>)) for (const k of Object.keys(cats)) specCats.push([a, k]);
 
-  // One group after another, a few calls at a time, each retried: the public Arc RPC
-  // refuses bursts, and one refused call must not take the whole page down.
-  const catOf = await gentle(ids, (id) => p.categoryOf(id));
+  // Few calls, a few at a time, each retried: the public Arc RPC refuses bursts, and one
+  // refused call must not take the page down. Everything that can be worked out from
+  // the covers and the marketplace records is worked out here instead of read.
+  const catOfRest = await gentle(ids, (id) => p.categoryOf(id));
   const quotes = await gentle(quoteIds, (id) => p.quote(id));
   const covers = await gentle(coverIds, (id) => p.getCover(id));
   const shopRows = await gentle(partnerAddrs, (a) => p.shopStats(a));
-  const fakesIn = await gentle(specCats, ([a, k]) => p.fakesStampedIn(a, catKey(k)));
-  const shares = await gentle(memberAddrs, (a) => p.sharesOf(a));
-  // A member's own rate as a seller: base for watches + their record + their inviter's (no authenticator part).
-  const rates = await gentle(memberAddrs, (a) => p.rate(a, ethers.ZeroAddress, catKey("watches")), true);
-  const fakesSold = await gentle(memberAddrs, (a) => p.fakesSoldBy(a));
-  const rejected = await gentle(memberAddrs, (a) => p.claimsRejectedOf(a));
-  // What a stake is worth = its share of the pool (same sum the contract's stakeValue does).
-  const values = shares.map((sh: bigint) => (BigInt(poolRaw[5]) === 0n ? 0n : (sh * BigInt(poolRaw[0])) / BigInt(poolRaw[5])));
+  const anyStake = BigInt(poolRaw[5]) > 0n;
+  const shares: bigint[] = anyStake ? await gentle(memberAddrs, (a) => p.sharesOf(a)) : memberAddrs.map(() => 0n);
+  // What a stake is worth = its share of the pool (the same sum as the contract's stakeValue).
+  const values = shares.map((sh) => (anyStake ? (sh * BigInt(poolRaw[0])) / BigInt(poolRaw[5]) : 0n));
+
+  // Records the contract keeps as counters, recounted from the covers (state 3 = paid as fake, 4 = rejected).
+  const count = (pred: (c: any) => boolean) => covers.filter(pred).length;
+  const lcEq = (x: string, y: string) => x.toLowerCase() === y.toLowerCase();
+  const fakesSold = memberAddrs.map((a) => count((c) => Number(c.state) === 3 && lcEq(c.seller, a)));
+  const rejected = memberAddrs.map((a) => count((c) => Number(c.state) === 4 && lcEq(c.buyer, a)));
+  const fakesIn = specCats.map(([a, k]) => count((c) => Number(c.state) === 3 && lcEq(c.shop, a) && catName(c.category) === k));
+
+  // A member's own rate as a seller of a watch (no authenticator part): the contract's rate() formula.
+  const watchBase = setup.categories.find((c: any) => c.key === "watches")?.baseBps ?? 300;
+  const rec = (a: string | null) => (a ? chain.records[a.toLowerCase()] ?? chain.records[a] : null) ?? {};
+  const rates = memberAddrs.map((a, i) => {
+    const r = rec(a);
+    const sold = Number(r.sold ?? 0);
+    let sellerAdj = sold === 0 ? 200 : 0;
+    sellerAdj -= Math.min(150, sold * 25);
+    sellerAdj += Number(r.disputesLost ?? 0) * 300 + Number(r.refundsGiven ?? 0) * 100 + fakesSold[i] * 500;
+    const inviter = chain.members.find((m) => lcEq(m.addr, a))?.invitedBy ?? null;
+    const inviterAdj = inviter ? Math.min(300, Number(rec(inviter).inviteesDisputesLost ?? 0) * 100) : 0;
+    const feeBps = Math.max(100, Math.min(2000, watchBase + sellerAdj + inviterAdj));
+    return { feeBps, base: watchBase, sellerAdj, inviterAdj };
+  });
+  const catOf = [...catOfRest, ...quotes.map((q: any) => q.category)];
+  const catIds = [...ids, ...quoteIds];
 
   const categoryOf: Record<number, string> = {};
-  catOf.forEach((k: string, i: number) => { const n = catName(k); if (n) categoryOf[ids[i]] = n; });
+  catOf.forEach((k: string, i: number) => { const n = catName(k); if (n) categoryOf[catIds[i]] = n; });
   const quote: Record<number, any> = {};
   quotes.forEach((q: any, i: number) => {
     quote[quoteIds[i]] = {
@@ -300,11 +327,7 @@ export async function readProtection(chain: { items: any[]; partners: any[]; mem
   specCats.forEach(([a, k], i) => { if (shops[a]) shops[a].fakesIn[k] = Number(fakesIn[i]); });
   const members: Record<string, any> = {};
   memberAddrs.forEach((a, i) => {
-    const r: any = rates[i];
-    members[a.toLowerCase()] = {
-      shares: big(shares[i]), value: big(values[i]), fakesSold: Number(fakesSold[i]), claimsRejected: Number(rejected[i]),
-      rate: r ? { feeBps: Number(r.feeBps), base: Number(r.base), sellerAdj: Number(r.sellerAdj), inviterAdj: Number(r.inviterAdj) } : null,
-    };
+    members[a.toLowerCase()] = { shares: big(shares[i]), value: big(values[i]), fakesSold: fakesSold[i], claimsRejected: rejected[i], rate: rates[i] };
   });
   const [assets, locked, free, fees, paid, totalShares] = poolRaw as any[];
   return {

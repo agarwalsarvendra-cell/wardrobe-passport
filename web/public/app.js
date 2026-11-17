@@ -273,7 +273,14 @@
   };
 
   let refreshSeq = 0;
+  // One read at a time: a slow answer must not stack up more requests behind it.
+  let refreshPending = null;
   async function refresh() {
+    while (refreshPending) await refreshPending; // let the running read finish, then read fresh
+    refreshPending = refreshNow().finally(() => { refreshPending = null; });
+    return refreshPending;
+  }
+  async function refreshNow() {
     const seq = ++refreshSeq;
     try {
       const d = await api("/api/state");
@@ -2007,6 +2014,7 @@
       updateToast(t, `${label}: waiting for Arc…`, "pending");
       await tx.wait();
       updateToast(t, `${label}: done.`, "ok", tx.hash);
+      await api("/api/state?fresh=1").catch(() => {}); // this didn't go through the server, so ask it to re-read Arc
       await connect(); await refresh();
     } catch (e) {
       console.error(e);
@@ -2310,7 +2318,7 @@
       await connect();
       await route();
       await refresh();
-      setInterval(() => { if (!state.busy && !document.hidden) refresh(); }, CFG.refreshMs);
+      setInterval(() => { if (!state.busy && !document.hidden && !refreshPending) refresh(); }, CFG.refreshMs);
     } catch (e) {
       state.fatal = e.message || String(e);
       render();

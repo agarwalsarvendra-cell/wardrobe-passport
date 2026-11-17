@@ -1,4 +1,4 @@
-import { readProtectionSafe, readState } from "@/lib/chain";
+import { forgetAll, readProtectionSafe, readState, snapshot } from "@/lib/chain";
 import { currentSession } from "@/lib/auth";
 import { q } from "@/lib/db";
 import { safely } from "@/lib/http";
@@ -9,20 +9,26 @@ export const maxDuration = 60;
 
 // Items, histories, members, disputes and track records, read from Arc. Members also get
 // the ledger (every action with its Arc transaction), flags and authentication requests.
-export async function GET() {
+export async function GET(req: Request) {
   return safely(async () => {
     const s = await currentSession();
+    // The admin's own MetaMask transactions don't pass through this server, so the admin can ask for a fresh read.
+    if (s.isAdmin && new URL(req.url).searchParams.get("fresh") === "1") forgetAll();
     const signedIn = !!s.user || s.isAdmin;
-    const users = signedIn ? await allUsers() : [];
-    const chain = await readState(users.map((u) => u.address));
-    const [prot, metaRows] = await Promise.all([
-      readProtectionSafe(chain, users.filter((u) => u.role === "member").map((u) => u.address)),
-      q("select item_id, category from piece_meta"),
-    ]);
-    const categories: Record<number, string> = {};
-    for (const r of metaRows) categories[Number(r.item_id)] = r.category;
+    // One shared read of both contracts (see snapshot). It always covers every account, so the
+    // same snapshot serves signed-in and signed-out visitors; balances are filtered below.
+    const { chain, prot, categories } = await snapshot(async () => {
+      const users = await allUsers();
+      const chain = await readState(users.map((u) => u.address));
+      const metaRows = await q("select item_id, category from piece_meta");
+      const categories: Record<number, string> = {};
+      for (const r of metaRows) categories[Number(r.item_id)] = r.category;
+      const prot = await readProtectionSafe(chain, users.filter((u) => u.role === "member").map((u) => u.address), categories);
+      return { chain, prot, categories };
+    });
     if (!signedIn) return { ...chain, protection: prot, categories, balances: {}, authRequests: {}, flags: {}, ledger: [] };
 
+    const users = await allUsers();
     const [reqs, flagRows, ledger, feed, feedStat] = await Promise.all([
       q("select item_id, owner_address, partner_address, status, note, created_at, decided_at from auth_requests"),
       q("select item_id, handle, reason from flags"),
