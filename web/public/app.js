@@ -204,8 +204,19 @@
     const m = /(?:^icon:|;kind=)(\w+)$/.exec(imageUrl || "");
     return m && ICONS[m[1]] ? m[1] : "other";
   }
+  // Studio pictures of the demo pieces, rendered from our own 3D models (web/public/seed).
+  // Used when a piece has no uploaded photo and its name matches.
+  const SEED_ART = {
+    "Seiko 5 automatic": "seiko", "Sterling silver bangle": "bangle", "Khaki Field mechanical": "khaki-field", "Seamaster De Ville (1968)": "seamaster",
+    "PRX quartz": "prx", "Pearl stud earrings": "pearls", "Gold chain necklace": "chain", "Conquest automatic (1972)": "conquest",
+    "Solitaire pendant": "pendant", "Signet ring": "signet", "Expedition field watch": "timex", "Tennis bracelet": "bracelet",
+    "Promaster diver": "promaster", "G-Shock DW-5600": "gshock", "Speedmaster Professional (1979)": "speedmaster",
+    "Submariner-style diver": "diver", "Gold hoop earrings": "hoops", "Seiko Presage cocktail": "presage",
+    "Field watch": "timex", "Steel dive watch": "diver", "Constellation (1966)": "constellation", "Diamond stud earrings": "studs", "Gold signet ring": "signet",
+    "Solitaire ring": "solitaire", "Tabby shoulder bag": "tabby", "Leather crossbody": "crossbody", "Quilted flap bag": "quilted", "Leather tote": "tote",
+  };
   function art(item, cls = "") {
-    const src = photoSrc(item.imageUrl);
+    const src = photoSrc(item.imageUrl) || (SEED_ART[item.name] ? `seed/${SEED_ART[item.name]}.jpg?v=3` : null);
     if (src) return `<div class="art photo ${cls}"><img src="${esc(src)}" alt="${esc(item.name)}" loading="lazy"></div>`;
     const k = iconKey(item.imageUrl);
     const ic = ICONS[k];
@@ -217,6 +228,7 @@
     { name: "Constellation (1966)", brand: "Omega", details: "Pie-pan dial, calibre 561", kind: "watch", category: "vintage-watches" },
     { name: "Diamond stud earrings", brand: "Blue Nile", details: "0.5 ct total, with report", kind: "ring", category: "jewelry" },
     { name: "Gold signet ring", brand: "Mejuri", details: "14k, size 7", kind: "ring", category: "jewelry" },
+    { name: "Quilted flap bag", brand: "Chanel", details: "Medium, lambskin, with dust bag", kind: "bag", category: "handbags" },
   ];
 
   // ------------------------------------------------------------- API access
@@ -572,12 +584,19 @@
     el.innerHTML = `
       <section class="why" aria-labelledby="why-h">
         <div class="why-copy">
-          <h2 id="why-h">Pre-owned watches and jewelry, checked by specialists who stake their own money</h2>
-          <p>Every member's ID and every piece is checked in person. Your money is held until it arrives, and 90-day protection is priced from everyone's record.</p>
+          <h2 id="why-h">Pre-owned watches and jewelry you can trust</h2>
+          <p>A specialist checks every piece in person and stakes money on that check. Your payment is held until the piece arrives.</p>
           <div class="row why-cta"><a class="btn gold" href="#browse" data-scroll="browse">Browse pieces</a><button class="btn ghost" data-action="open-signin">Sign in</button></div>
-          <p class="why-hint">Drag the passport to spin it. Hover a badge to see what you get.</p>
+          <div class="try-as">
+            <span>New here? Try the demo as a</span>
+            <div class="try-row">
+              <button class="try-btn" data-demo="alex"><b>Buyer</b><small>Buy a piece and add protection</small></button>
+              <button class="try-btn" data-demo="maya"><b>Seller</b><small>Add a piece and list it</small></button>
+              <button class="try-btn" data-demo="shop"><b>Authenticator</b><small>Check pieces and back them</small></button>
+            </div>
+          </div>
         </div>
-        <div class="stage3d" tabindex="0" aria-label="3D passport with the benefits of joining. Drag or use the arrow keys to spin it.">
+        <div class="stage3d" tabindex="0" aria-label="3D passport with a watch on it and the benefits of joining. Drag or use the arrow keys to spin it." title="Drag to spin">
           <canvas aria-hidden="true"></canvas>
           <div class="orbit"></div>
         </div>
@@ -599,6 +618,7 @@
       ${live.length ? `<div class="lgrid">${live.map((i) => card(i, "")).join("")}</div>`
         : `<div class="empty slim"><p>${filtering ? "Nothing matches. Try another category or search." : "Nothing for sale yet."}</p></div>`}
       ${sold.length ? `<h3 class="grid-h">Recently sold</h3><div class="lgrid">${sold.map((i) => card(i, "")).join("")}</div>` : ""}
+      ${buyStepsHtml()}
       ${communityHtml()}
       ${protectionPitchHtml()}
       ${explainHtml()}`;
@@ -606,14 +626,16 @@
 
   // The people in the community. Each one can be used to try the app (demo sign-in).
   function communityHtml() {
-    const people = [...state.demo.filter((d) => d.handle !== "shop"), ...state.seeded];
+    const SHOPS = ["shop", "shop2"];
+    const people = [...state.demo.filter((d) => !SHOPS.includes(d.handle)), ...state.seeded];
+    const shopHandle = (p) => state.demo.find((d) => SHOPS.includes(d.handle) && d.name === p.name)?.handle || dirByAddr(p.addr)?.handle || "";
     if (!people.length) return "";
     const shops = state.partners.filter((p) => p.active);
     return `
       <section class="community" aria-labelledby="community-h">
         <div class="community-head">
           <div><h2 id="community-h">Meet the community</h2><p>Every member joined by invitation and had their ID checked in person. Tap anyone to try the app as them.</p></div>
-          <div class="shop-cards">${shops.map((p) => `<button class="shop-card" data-demo="${esc(dirByAddr(p.addr)?.handle || "")}" ${dirByAddr(p.addr) ? "" : "disabled"}><span class="avatar">${esc(p.name[0])}</span><span><b>${esc(p.name)}</b><small>${esc(p.city)} · ${specialtiesOf(p.addr).length ? esc(specialtiesOf(p.addr).map(catName).join(", ")) : "authenticator"}${shopStatsOf(p.addr) ? ` · ${usd(BigInt(shopStatsOf(p.addr).bond))} bond` : ""}</small></span></button>`).join("")}</div>
+          <div class="shop-cards">${shops.map((p) => `<button class="shop-card" data-demo="${esc(shopHandle(p))}" ${shopHandle(p) ? "" : "disabled"} aria-label="Try the app as ${esc(p.name)}"><span class="avatar">${esc(p.name[0])}</span><span><b>${esc(p.name)}</b><small>${esc(p.city)} · ${specialtiesOf(p.addr).length ? esc(specialtiesOf(p.addr).map(catName).join(", ")) : "authenticator"}${shopStatsOf(p.addr) ? ` · ${usd(BigInt(shopStatsOf(p.addr).bond))} bond` : ""}</small></span></button>`).join("")}</div>
         </div>
         <div class="people-grid">${people.map((u) => `
           <button class="person-card" data-demo="${esc(u.handle)}" aria-label="Try the app as ${esc(u.name)}">
@@ -642,6 +664,21 @@
           <div><b>${covers}</b><small>${covers === 1 ? "purchase" : "purchases"} protected</small></div>
           <div><b>${usd(BigInt(p.pool.paid))}</b><small>paid out on ${plural(paid, "fake", "fakes")}</small></div>
         </div>
+      </section>`;
+  }
+
+  // What happens when you buy, in order. Shown under the listings.
+  function buyStepsHtml() {
+    const steps = [
+      ["Pick a piece", "Each one was checked in person by a specialist in its category, who has money staked behind the check."],
+      ["Pay, and your money is held", "The contract on Arc holds it. The seller is paid only after you confirm the piece arrived."],
+      ["Add 90-day protection", "Optional. If a second specialist later finds it's fake, you get the full price back."],
+      ["Confirm, or dispute", "Something wrong before you confirm? Five members drawn at random decide, and the contract pays out."],
+    ];
+    return `
+      <section class="buy-steps" aria-labelledby="steps-h">
+        <h2 id="steps-h">How buying works</h2>
+        <ol>${steps.map(([t, d], i) => `<li><span class="num">${i + 1}</span><h3>${t}</h3><p>${d}</p></li>`).join("")}</ol>
       </section>`;
   }
 
@@ -737,7 +774,7 @@
     return out;
   }
   /** "Why this price?": each part of the fee, with the record behind it. */
-  function whyPriceHtml(item, q) {
+  function whyPriceHtml(item, q, open = false) {
     const r = recOf(item.owner);
     const mp = memberProt(item.owner) || {};
     const ss = shopStatsOf(item.authBy);
@@ -749,8 +786,10 @@
     const invRec = inviter ? recOf(inviter) : null;
     const fakesHere = ss?.fakesIn?.[q.category] || 0;
     const shopWhy = fakesHere ? `${plural(fakesHere, "fake", "fakes")} stamped in ${catName(q.category).toLowerCase()} (+4% each)` : q.shopAdj < 0 ? "10+ stamps and no fakes anywhere (−0.5%)" : "No fakes in this category";
-    return `
-      <details class="why-price"><summary>Why this price?</summary>
+    const step = (label, bps, first) => `<span class="ladder-step ${!first && bps > 0 ? "up" : !first && bps < 0 ? "down" : ""}"><small>${label}</small><b>${first ? pctTxt(bps) : bps ? signedPct(bps) : "0%"}</b></span>`;
+    const ladder = `<div class="ladder" aria-label="How the protection price is worked out">${step("Category", q.base, true)}${step("Seller", q.sellerAdj)}${step("Inviter", q.inviterAdj)}${step("Authenticator", q.shopAdj)}<span class="ladder-step total"><small>Your rate</small><b>${pctTxt(q.feeBps)}</b></span></div>`;
+    return `${ladder}
+      <details class="why-price" ${open ? "open" : ""}><summary>Why this price?</summary>
         ${row(`${catName(q.category)} base rate`, q.base, "Set per category. Vintage pieces are harder to judge.")}
         ${row(`Seller: ${esc(nameOf(item.owner))}`, q.sellerAdj, sellerWhy)}
         ${row(`Invited by ${inviter ? esc(nameOf(inviter)) : "no one"}`, q.inviterAdj, inviter ? (invRec.inviteesDisputesLost ? `People they invited lost ${plural(invRec.inviteesDisputesLost, "dispute", "disputes")} (+1% each, up to +3%)` : "People they invited have a clean record") : "Founding member")}
@@ -758,6 +797,25 @@
         <div class="why-row total"><span><b>Your price</b><small>${pctTxt(q.feeBps)} of ${usd(item.price)}, kept between 1% and 20%</small></span><span class="why-pct">${usd(q.fee)}</span></div>
         <p class="fine">Calculated on Arc by the protection contract from records nobody can edit.</p>
       </details>`;
+  }
+
+  /** Where a refund comes from: half from the stamping shop's bond, half from the members' pool. Real amounts from the contract. */
+  function payoutBar(c, preview = false) {
+    const amount = BigInt(c.amount), fee = (amount * 200n) / 10000n;
+    const fromBond = preview ? amount / 2n : BigInt(c.shopLock) - fee;
+    const fromPool = preview ? amount - amount / 2n : BigInt(c.poolLock);
+    const shop = esc(nameOf(c.shop));
+    const shops = shop + (shop.endsWith("s") ? "’" : "’s");
+    const share = Number((fromBond * 1000n) / (fromBond + fromPool || 1n)) / 10;
+    const head = preview ? `If it's proven fake, you get ${usd(amount)} back` : `${usd(fromBond + fromPool)} refunded automatically`;
+    const note = preview ? `${shop} locks its half the moment you add protection, so the money is there before you need it.`
+      : `${shop} also paid the second specialist's review fee (${usd(fee)}).${BigInt(c.claimDeposit || 0) ? ` The ${usd(BigInt(c.claimDeposit))} claim deposit was returned too.` : ""}`;
+    return `<div class="payout ${preview ? "preview" : ""}">
+        <div class="payout-head">${head}</div>
+        <div class="payout-bar" role="img" aria-label="${usd(fromBond)} from ${shops} bond and ${usd(fromPool)} from the members' pool"><span class="pb-bond" style="width:${share}%"></span><span class="pb-pool" style="width:${100 - share}%"></span></div>
+        <div class="payout-legend"><span><i class="pb-bond"></i><b>${usd(fromBond)}</b> from ${shops} bond</span><span><i class="pb-pool"></i><b>${usd(fromPool)}</b> from the members' pool</span></div>
+        <small>${note}</small>
+      </div>`;
   }
 
   function renderSellerHome() {
@@ -853,7 +911,7 @@
       void: `The sale didn't complete, so the ${fee} fee was refunded.`,
     }[c.state];
     const cls = c.state === "paid" ? "ok" : c.state === "rejected" ? "bad" : c.state === "claimed" ? "held" : "info";
-    return `<div class="prot-status ${cls}"><span class="shield" aria-hidden="true">🛡</span><span>${line}</span>${canClaim ? `<button class="btn danger small" data-action="claim-fake" data-cover="${c.id}" ${dis}>This is a fake</button>` : ""}</div>`;
+    return `<div class="prot-status ${cls}"><span class="shield" aria-hidden="true">🛡</span><span>${line}</span>${canClaim ? `<button class="btn danger small" data-action="claim-fake" data-cover="${c.id}" ${dis}>This is a fake</button>` : ""}</div>${c.state === "paid" ? payoutBar(c) : ""}`;
   }
 
   function renderMine() {
@@ -1045,7 +1103,7 @@
       </div>
       <div class="h-label">Your specialties</div>
       <div class="panel people">${specs.length ? specs.map((k) => `
-        <div class="person"><span class="pn"><strong>${esc(catName(k))}</strong><small>${esc(specIn(myAddr(), k).credential)}</small></span><span class="pr">${plural(ss.fakesIn?.[k] || 0, "fake", "fakes")} proven in this category</span></div>`).join("") : `<p class="muted">You're not approved for any category yet. The platform admin approves specialists.</p>`}</div>
+        <div class="person noav"><span class="pn"><strong>${esc(catName(k))}</strong><small>${esc(specIn(myAddr(), k).credential)}</small></span><span class="pr">${plural(ss.fakesIn?.[k] || 0, "fake", "fakes")} proven in this category</span></div>`).join("") : `<p class="muted">You're not approved for any category yet. The platform admin approves specialists.</p>`}</div>
       <div class="h-label">Protected sales on your stamp</div>
       ${mine.length ? `<div class="done-list">${mine.map((c) => { const it = itemById(c.itemId); return `<button class="done" data-open="${c.itemId}">${it ? art(it, "mini") : ""}<span><strong>${esc(it?.name || "Piece")}</strong><small>${esc(nameOf(c.buyer))} · ${esc(c.state)} · ${usd(BigInt(c.shopLock))} of your bond ${["pending", "active", "claimed"].includes(c.state) ? "held" : c.state === "paid" ? "paid out" : "released"}</small></span><span class="done-amt">${usd(BigInt(c.amount))}</span></button>`; }).join("")}</div>` : `<div class="empty slim"><p>No protected sales yet.</p></div>`}`;
   }
@@ -1229,6 +1287,7 @@
       ${tiles([[usd(BigInt(pool.assets)), "in the pool"], [usd(BigInt(pool.locked)), "behind live protection"], [usd(BigInt(pool.fees)), "fees earned"], [usd(BigInt(pool.paid)), "paid out on fakes"], [usd(totalBonds()), "staked by authenticators"], [p.covers.length, "purchases protected"]])}
       <div class="panel">
         <h3 style="margin-top:0">How a claim is paid</h3>
+        ${p.covers.filter((c) => c.state === "paid").slice(-2).reverse().map((c) => `<div class="paid-claim"><b>${esc(itemById(c.itemId)?.name || "Piece")}</b><span>proven fake by ${esc(nameOf(c.reviewer))}, ${esc(nameOf(c.buyer))} refunded</span>${payoutBar(c)}</div>`).join("")}
         <p class="fine" style="margin-top:0">On a $100 piece: the authenticator's bond pays the first $50 and the pool pays $50, so the buyer gets the full price back. The second specialist who re-inspected it earns $2 from the bond. If the piece is genuine, the buyer's 5% claim deposit pays the reviewer and the rest goes to the pool.</p>
         ${isMember && !readOnly() ? `
         <div class="h-label">Your stake</div>
@@ -1344,7 +1403,7 @@
     const rows = (CFG.specialistPlan || []).map((x, i) => {
       const u = planShop(x.shop);
       const ok = u && specIn(u.address, x.category);
-      return `<div class="person"><span class="pn"><strong>${esc(u?.name || x.shop)} · ${esc(catName(x.category))}</strong><small>${esc(x.credential)}</small></span>
+      return `<div class="person noav"><span class="pn"><strong>${esc(u?.name || x.shop)} · ${esc(catName(x.category))}</strong><small>${esc(x.credential)}</small></span>
         <span>${ok ? `<span class="chip ok">Approved</span>` : u && partnerOf(u.address) ? `<button class="btn gold small" data-action="approve-spec" data-plan="${i}" ${dis}>Approve with MetaMask</button>` : `<span class="chip owned">Approve the partner first</span>`}</span></div>`;
     }).join("");
     return `
@@ -1389,7 +1448,8 @@
       <span class="live ${state.online ? "" : "down"}">${state.online ? `Live on ${esc(CFG.chainName)}` : "Reconnecting to Arc…"}</span><span>·</span>
       <a href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">Contract ${short(CFG.contractAddress)} ↗</a><span>·</span>
       <button class="linkish foot-link" data-action="how">How it works</button><span>·</span>
-      <span>${CFG.walletProvider === "circle" ? "Wallets by Circle · " : ""}Test dollars on Arc Testnet</span>`;
+      <span>${CFG.walletProvider === "circle" ? "Wallets by Circle · " : ""}Test dollars on Arc Testnet</span><span>·</span>
+      <a class="foot-look" href="?look=${document.documentElement.dataset.look === "house" ? "classic" : "house"}">${document.documentElement.dataset.look === "house" ? "Switch to the standard look" : "Preview the auction-house look"}</a>`;
   }
 
   function render() {
@@ -1840,7 +1900,8 @@
       ${welcome && Number(ethers.formatUnits(item.price, 18)) >= (CFG.rules?.welcomeMinOrder ?? 15) ? `<div class="callout ok">Welcome gift: your first delivery is free (up to $${welcome.dollars}).</div>` : ""}
       ${offer ? `
       <label class="check prot-check"><input id="b-protect" type="checkbox" checked> <span><b>Add 90-day protection for ${usd(q.fee)}</b><small>If a second specialist finds it's fake within 90 days of delivery, you get the full ${usd(item.price)} back. ${esc(nameOf(item.authBy))}'s bond pays first. Added right after you pay.</small></span></label>
-      ${whyPriceHtml(item, q)}` : ""}
+      ${whyPriceHtml(item, q, true)}
+      ${payoutBar({ amount: item.price, shop: item.authBy }, true)}` : ""}
       <div class="facts"><div class="fact"><small>Price</small><strong>${usd(item.price)}</strong></div>${offer ? `<div class="fact"><small>With protection</small><strong>${usd(total)}</strong></div>` : ""}<div class="fact"><small>Your balance</small><strong>${usd(bal)}</strong></div></div>
       ${capped ? `<div class="callout bad">New members can buy items up to $50. Get your ID checked at a partner authenticator to lift the limit.</div>`
         : enough ? `<button class="btn gold block" data-action="pay" data-id="${item.id}" ${state.busy ? "disabled" : ""}>Pay ${usd(item.price)}</button>`

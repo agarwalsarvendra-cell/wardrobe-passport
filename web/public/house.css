@@ -1,0 +1,104 @@
+/* "Auction house" look: a preview you switch on with ?look=house (or the link in the footer).
+   Nothing here applies unless <html data-look="house">, so the standard look is untouched.
+   Paper #F8F7F4 · obsidian #111315 · bronze #7C5E2A · pine #164E35 · hairline #D0CFC9
+   Cormorant Garamond for titles, Plus Jakarta Sans for everything else. Square corners. */
+@font-face { font-family: "Cormorant Garamond"; font-weight: 600; font-style: normal; font-display: swap; src: url(fonts/house/cormorant-garamond-latin-600-normal.woff2) format("woff2"); }
+@font-face { font-family: "Cormorant Garamond"; font-weight: 600; font-style: italic; font-display: swap; src: url(fonts/house/cormorant-garamond-latin-600-italic.woff2) format("woff2"); }
+@font-face { font-family: "Cormorant Garamond"; font-weight: 700; font-style: normal; font-display: swap; src: url(fonts/house/cormorant-garamond-latin-700-normal.woff2) format("woff2"); }
+@font-face { font-family: "Plus Jakarta Sans"; font-weight: 400; font-display: swap; src: url(fonts/house/plus-jakarta-sans-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "Plus Jakarta Sans"; font-weight: 600; font-display: swap; src: url(fonts/house/plus-jakarta-sans-latin-600-normal.woff2) format("woff2"); }
+@font-face { font-family: "Plus Jakarta Sans"; font-weight: 700; font-display: swap; src: url(fonts/house/plus-jakarta-sans-latin-700-normal.woff2) format("woff2"); }
+
+html[data-look="house"] {
+  --cream: #F8F7F4; --paper: #FFFFFF; --ink: #111315; --navy: #111315; --navy-2: #282C32;
+  --gold: #7C5E2A; --gold-soft: #F1ECE0; --stamp: #164E35;
+  --rose: #7C5E2A; --rose-2: #5E4619;
+  --line: #D0CFC9; --muted: #4B525C; --faint: #8C9099;
+  --bond: #164E35; --bond-soft: #E7EEE9;
+  --radius: 2px;
+  --sans: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --serif: "Cormorant Garamond", "Iowan Old Style", Georgia, serif;
+  --lift: 0 10px 30px rgba(17, 19, 21, .10);
+}
+html[data-look="house"] body { background: var(--cream); font-family: var(--sans); }
+/* square everything: one rule beats the dozens of radii in the standard look */
+html[data-look="house"] *:not(.live):not(.dot):not(input[type="checkbox"]):not(input[type="radio"]):not(.payout-bar):not(.payout-bar span) { border-radius: 2px !important; }
+
+/* type */
+html[data-look="house"] :is(h1, h2, h3, h4, .detail-title, .lcard-row b, .payout-head) { font-family: var(--serif); font-weight: 600; letter-spacing: 0; }
+html[data-look="house"] .why-copy h2 { font-size: 64px; line-height: 1.0; font-weight: 600; max-width: 12ch; }
+html[data-look="house"] .why-copy > p { font-size: 18px; color: var(--navy-2); }
+html[data-look="house"] :is(.section-head h2, .buy-steps h2, .pitch h2, .intro h2) { font-size: 36px; }
+html[data-look="house"] .lcard-row b { font-size: 21px; line-height: 1.15; }
+html[data-look="house"] .lcard-row span, html[data-look="house"] .fact strong { font-family: var(--sans); font-weight: 700; font-variant-numeric: tabular-nums; }
+html[data-look="house"] .lcard-row { align-items: baseline; }
+
+/* top bar */
+html[data-look="house"] .topbar { background: var(--cream); border-bottom: 1px solid var(--ink); }
+html[data-look="house"] .brand h1 { font-family: var(--serif); font-size: 26px; font-weight: 700; color: var(--ink); }
+html[data-look="house"] .logo { stroke: var(--gold); }
+html[data-look="house"] .searchbar { box-shadow: none; border: 1px solid var(--line); background: #fff; }
+html[data-look="house"] .searchbar svg { background: var(--ink); }
+
+/* buttons */
+html[data-look="house"] .btn { font-weight: 600; letter-spacing: .01em; }
+html[data-look="house"] .btn.gold { background: var(--ink); color: #fff; }
+html[data-look="house"] .btn.gold:hover:not(:disabled) { background: var(--gold); filter: none; }
+html[data-look="house"] .btn.primary { background: var(--ink); }
+html[data-look="house"] .btn.ghost { background: transparent; border: 1px solid var(--ink); }
+html[data-look="house"] .btn.ghost:hover:not(:disabled) { background: var(--ink); color: #fff; }
+html[data-look="house"] .try-btn { background: transparent; border-color: var(--line); }
+html[data-look="house"] .try-btn:hover { border-color: var(--ink); box-shadow: none; background: #fff; }
+html[data-look="house"] .try-btn b { font-family: var(--serif); font-size: 21px; font-weight: 600; }
+
+/* hero */
+html[data-look="house"] .why { border-bottom: 1px solid var(--line); padding-bottom: 28px; }
+html[data-look="house"] .orb { background: var(--ink); color: #F1ECE0; box-shadow: none; border: 1px solid #2c3036; }
+html[data-look="house"] .orb svg { stroke: #C5A059; }
+html[data-look="house"] .orb :is(i, span.ico, .orb-ico) { background: transparent; }
+
+/* catalogue */
+html[data-look="house"] .cats { border-bottom-color: var(--line); }
+html[data-look="house"] .cat.active { color: var(--ink); border-bottom-color: var(--ink); }
+html[data-look="house"] .lcard-img { background: #ECE8E1; border: 1px solid var(--line); }
+html[data-look="house"] .lcard:hover .lcard-img { border-color: var(--ink); }
+html[data-look="house"] .lbadge { box-shadow: none; border: 1px solid var(--line); font-weight: 600; }
+html[data-look="house"] .lbadge.bond { background: var(--bond); border-color: var(--bond); box-shadow: none; }
+html[data-look="house"] .lcard-sub.prot-line { color: var(--bond); font-weight: 600; }
+html[data-look="house"] .intro-facts b { font-family: var(--serif); font-size: 22px; }
+
+/* the vault: the money part of the page goes dark */
+html[data-look="house"] .pitch { background: var(--ink); color: #F1ECE0; border: 1px solid var(--ink); }
+html[data-look="house"] .pitch h2 { color: #fff; }
+html[data-look="house"] .pitch p { color: #C9CCD1; }
+html[data-look="house"] .pitch-facts div { background: transparent; border: 1px solid #3A3F47; }
+html[data-look="house"] .pitch-facts b { color: #C5A059; font-family: var(--serif); font-size: 32px; font-weight: 600; }
+html[data-look="house"] .pitch-facts small { color: #A9AEB6; }
+html[data-look="house"] .buy-steps li { border-top: 1px solid var(--ink); }
+html[data-look="house"] .buy-steps .num { color: var(--gold); font-family: var(--serif); font-size: 22px; }
+html[data-look="house"] .buy-steps h3 { font-size: 22px; }
+
+/* passport and checkout */
+html[data-look="house"] .modal { background: var(--cream); border: 1px solid var(--ink); box-shadow: 0 30px 80px rgba(17,19,21,.35); }
+html[data-look="house"] .callout.held { background: #fff; border: 1px solid var(--line); }
+html[data-look="house"] :is(.prot-check, .prot-quote, .prot-offer) { background: var(--ink); color: #F1ECE0; }
+html[data-look="house"] :is(.prot-check, .prot-quote, .prot-offer) b { color: #C5A059; }
+html[data-look="house"] :is(.prot-check, .prot-quote, .prot-offer) small { color: #C9CCD1; }
+html[data-look="house"] .ladder-step { background: #fff; }
+html[data-look="house"] .ladder-step b { font-family: var(--sans); }
+html[data-look="house"] .ladder-step.total { background: var(--ink); border-color: var(--ink); }
+html[data-look="house"] .payout { background: #fff; }
+html[data-look="house"] .pb-pool { background: #C5A059; }
+html[data-look="house"] .why-price summary { color: var(--ink); }
+html[data-look="house"] .chip.ok, html[data-look="house"] .auth-badge { background: var(--bond-soft); color: var(--bond); }
+html[data-look="house"] .tab.active { border-bottom-color: var(--ink); }
+html[data-look="house"] .vbtn .count, html[data-look="house"] .tab .count { background: var(--gold); }
+html[data-look="house"] .foot { border-top: 1px solid var(--line); }
+html[data-look="house"] :is(.field input, .field select, .field textarea):focus { border-color: var(--ink); outline-color: var(--gold-soft); }
+html[data-look="house"] .why { background: none; }
+html[data-look="house"] .orb-ico { background: transparent; border: 1px solid #3A3F47; }
+html[data-look="house"] .orb-ico svg { stroke: #C5A059; }
+html[data-look="house"] .orb-text small { color: #A9AEB6; }
+html[data-look="house"] :is(h1, h2, h3, h4, .detail-title, .lcard-row b, .intro-facts b, .pitch-facts b, .buy-steps .num) { font-variant-numeric: lining-nums; }
+html[data-look="house"] .payout-head { font-family: var(--sans); font-weight: 700; }
+html[data-look="house"] .detail-title { font-size: 30px; line-height: 1.1; }

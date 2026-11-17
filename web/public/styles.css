@@ -999,3 +999,69 @@ button.shop-card:not(:disabled):hover { box-shadow: 0 8px 24px rgba(0,0,0,.16); 
 .qn-chip.ok { color: var(--bond); background: var(--bond-soft); }
 .qn-line { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); margin: 0 0 14px; }
 .qn-line .live { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
+
+/* Rows without an avatar (specialties, approvals): name and note on the left, status on the right */
+.person.noav { grid-template-columns: minmax(0, 1fr) auto; }
+.person.noav .pr { text-align: right; white-space: nowrap; }
+@media (max-width: 640px) { .person.noav { grid-template-columns: 1fr; } .person.noav .pr { text-align: left; grid-column: 1; } }
+/* The floating benefit badges stay under the sticky header when the page scrolls */
+.why { position: relative; z-index: 0; isolation: isolate; }
+.topbar { z-index: 50; }
+
+/* ------------------------------------------------------------ premium pass
+   Studio pictures on the cards, a calmer hero, and a clear way in for first-time visitors. */
+.why-copy h2 { font-size: 52px; line-height: 1.04; max-width: 13ch; }
+.why-copy > p { font-size: 19px; line-height: 1.5; max-width: 38ch; }
+.try-as { margin-top: 28px; padding-top: 22px; border-top: 1px solid var(--line); max-width: 520px; }
+.try-as > span { display: block; font-size: 15px; color: var(--muted); margin-bottom: 10px; }
+.try-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.try-btn { text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; cursor: pointer; font: inherit; color: var(--ink); transition: border-color .15s ease, box-shadow .15s ease; }
+.try-btn:hover { border-color: var(--ink); box-shadow: 0 6px 18px rgba(0,0,0,.08); }
+.try-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.try-btn b { display: block; font-size: 16px; }
+.try-btn small { display: block; color: var(--muted); font-size: 13px; line-height: 1.35; margin-top: 2px; }
+
+.lgrid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 40px 26px; }
+.lcard-img { border-radius: 18px; background: #EFEBE5; }
+.art.photo { background: #EFEBE5; }
+.lcard-img img { transition: transform .5s cubic-bezier(.2,.7,.2,1); }
+.lcard:hover .lcard-img img { transform: scale(1.06); }
+.lcard-row { font-size: 17px; margin-top: 2px; }
+.lcard-row b { font-weight: 800; letter-spacing: -0.005em; }
+.lbadge.bond { box-shadow: 0 2px 8px rgba(11,107,79,.28); }
+
+.buy-steps { margin: 56px 0 8px; }
+.buy-steps h2 { font-size: 28px; margin: 0 0 20px; letter-spacing: -.01em; }
+.buy-steps ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+.buy-steps li { border-top: 2px solid var(--ink); padding-top: 14px; }
+.buy-steps .num { font-size: 15px; font-weight: 800; color: var(--rose, #F0435A); }
+.buy-steps h3 { font-size: 18px; margin: 6px 0 6px; }
+.buy-steps p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+@media (max-width: 900px) { .buy-steps ol { grid-template-columns: 1fr 1fr; } .why-copy h2 { font-size: 40px; } }
+@media (max-width: 520px) { .buy-steps ol, .try-row { grid-template-columns: 1fr; } .why-copy h2 { font-size: 34px; } }
+
+/* Protection price ladder: the four things that set the rate, always visible */
+.ladder { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; align-items: stretch; }
+.ladder-step { flex: 1 1 86px; border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; background: #fff; }
+.ladder-step small { display: block; font-size: 12px; color: var(--muted); line-height: 1.2; }
+.ladder-step b { display: block; font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.ladder-step.up b { color: var(--err); } .ladder-step.down b { color: var(--ok); }
+.ladder-step.total { background: var(--bond); border-color: var(--bond); }
+.ladder-step.total small { color: rgba(255,255,255,.85); } .ladder-step.total b { color: #fff; }
+.ladder + .why-price { margin-top: 8px; }
+
+/* Refund split: shop bond and members' pool */
+.payout { margin-top: 12px; border: 1px solid var(--line); border-radius: 14px; padding: 14px; background: #fff; text-align: left; }
+.payout-head { font-weight: 800; font-size: 16px; margin-bottom: 10px; }
+.payout-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; gap: 2px; }
+.payout-bar span { display: block; height: 100%; transform-origin: left center; animation: payout-grow .9s cubic-bezier(.2,.7,.2,1) both; }
+.payout-bar .pb-pool { animation-delay: .35s; }
+.pb-bond { background: var(--bond); } .pb-pool { background: #E0A100; }
+.payout-legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 10px; font-size: 14px; }
+.payout-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; }
+.payout-legend b { font-variant-numeric: tabular-nums; }
+.payout small { display: block; margin-top: 8px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.payout.preview { border-style: dashed; }
+.paid-claim { margin: 0 0 16px; } .paid-claim > b { font-size: 16px; } .paid-claim > span { color: var(--muted); font-size: 14px; margin-left: 8px; }
+@keyframes payout-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) { .payout-bar span { animation: none; } }

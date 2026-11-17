@@ -205,6 +205,7 @@ async function protectionSteps(people: Record<string, User>, shop: User, origin:
       if (ethers.ZeroAddress === it.authBy) {
         const a = await authenticatorFor(h.category, shop);
         await perform(seller, "requestAuth", { id, partner: a.address });
+        await ensureFunds(a, 0.3); // fee money for the authenticator
         await perform(a, "authenticate", { id, note: NOTE[h.category] ?? "Inspected in store." }); // certifies too
         it = await ct.getItem(id);
       }
@@ -244,13 +245,14 @@ async function protectionSteps(people: Record<string, User>, shop: User, origin:
     const seller = people[s.seller], buyer = people[s.buyer], a = shops[s.shop];
     steps.push({ label: `${s.seller} adds “${s.name}”`, run: async (c) => {
       await ensureFunds(seller, 0.4 + s.price * 0.1);
-      c.items[s.key] = (await perform(seller, "createPassport", { name: s.name, brand: s.brand, details: s.details, icon: s.icon, category: s.category, photo: null })).id!;
+      c.items[s.key] = (await perform(seller, "createPassport", { name: s.name, brand: s.brand, details: s.details, icon: s.icon, category: s.category, photo: await seedPhoto(origin, s.photo) })).id!;
     } });
     steps.push({ label: `${a.name} authenticates it, and ${s.seller} lists it for $${s.price}`, run: async (c) => {
       const id = c.items[s.key];
       let it = await contract().getItem(id);
       if (ethers.ZeroAddress === it.authBy) {
         await perform(seller, "requestAuth", { id, partner: a.address });
+        await ensureFunds(a, 0.3);
         await perform(a, "authenticate", { id, note: NOTE[s.category] ?? "Inspected in store." });
         it = await contract().getItem(id);
       }

@@ -1,0 +1,72 @@
+<!doctype html><meta charset="utf-8"><body style="margin:0;background:#fff">
+<script type="module">
+// Renders one studio picture per piece in models3d.js. Driven by test/render-pieces.py.
+// The piece is rendered on a clear background at 2x, then composed in 2D over a soft
+// backdrop with a floor reflection and a contact shadow.
+import { THREE, PIECES, buildPiece, studioEnv } from "/models3d.js";
+const SIZE = 1000, SS = 2;
+const canvas = document.createElement("canvas"); canvas.width = canvas.height = SIZE * SS;
+const gl = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+gl.setPixelRatio(1); gl.setSize(SIZE * SS, SIZE * SS, false); gl.setClearColor(0x000000, 0);
+gl.outputColorSpace = THREE.SRGBColorSpace; gl.toneMapping = THREE.ACESFilmicToneMapping; gl.toneMappingExposure = 1.12; gl.shadowMap.enabled = true; gl.shadowMap.type = THREE.PCFSoftShadowMap;
+const env = studioEnv(gl);
+const POSE = {
+  watch: { rot: [0.0, -0.52, 0.0], pitch: 0.2, fill: 0.74 },
+  bag: { rot: [0, 0, 0], pitch: 0.16, fill: 0.78 },
+  jewel: { rot: [0, 0, 0], pitch: 0.34, fill: 0.62 },
+};
+function snap() { const c = document.createElement("canvas"); c.width = c.height = SIZE * SS; c.getContext("2d").drawImage(canvas, 0, 0); return c; }
+window.renderPiece = (file) => {
+  const spec = PIECES[file], pose = { ...POSE[spec.t], ...(spec.pose || {}) };
+  const scene = new THREE.Scene(); scene.environment = env;
+  const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(-2.5, 9, 3.5); scene.add(key);
+  key.castShadow = true; key.shadow.mapSize.set(2048, 2048); key.shadow.radius = 9; key.shadow.blurSamples = 20; key.shadow.bias = -0.0005;
+  Object.assign(key.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 0.5, far: 30 });
+  const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShadowMaterial({ opacity: 0.3, color: 0x2a1c12 }));
+  floorMesh.rotation.x = -Math.PI / 2; floorMesh.receiveShadow = true; scene.add(floorMesh);
+  const rim = new THREE.DirectionalLight(0xfff0dd, 0.8); rim.position.set(5, 3, -4); scene.add(rim);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+  const piece = buildPiece(spec);
+  piece.traverse((m) => { if (m.isMesh && !m.material.transparent) m.castShadow = true; });
+  const turn = new THREE.Group(); turn.add(piece); turn.rotation.set(...pose.rot);
+  const stand = new THREE.Group(); stand.add(turn); scene.add(stand);
+  stand.updateMatrixWorld(true); let box = new THREE.Box3().setFromObject(stand, true);
+  const mid = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+  turn.position.set(-mid.x, -box.min.y, -mid.z);            // stands on the floor at y = 0, centred
+  const cam = new THREE.PerspectiveCamera(22, 1, 0.1, 200);
+  const dist = (Math.max(size.x, size.y * 1.05) / pose.fill) / (2 * Math.tan((11 * Math.PI) / 180));
+  const look = new THREE.Vector3(0, size.y * 0.46, 0);
+  cam.position.set(0, look.y + Math.sin(pose.pitch) * dist, Math.cos(pose.pitch) * dist); cam.lookAt(look);
+  gl.clear(); gl.render(scene, cam); const main = snap();
+  // reflection: the same piece mirrored through the floor
+  floorMesh.visible = false; stand.scale.y = -1; gl.clear(); gl.render(scene, cam); const mirror = snap(); stand.scale.y = 1;
+  const floor = new THREE.Vector3(0, 0, 0).project(cam), fy = (-floor.y * 0.5 + 0.5) * SIZE;
+  const left = new THREE.Vector3(-size.x / 2, 0, 0).project(cam), right = new THREE.Vector3(size.x / 2, 0, 0).project(cam);
+  const fw = ((right.x - left.x) * 0.5) * SIZE;
+
+  const out = document.createElement("canvas"); out.width = out.height = SIZE; const g = out.getContext("2d");
+  g.imageSmoothingQuality = "high";
+  // backdrop: warm stone wall, a lighter pool behind the piece, and a slightly darker table
+  const wall = g.createLinearGradient(0, 0, 0, SIZE); wall.addColorStop(0, "#EDE8E1"); wall.addColorStop(0.55, "#F3EFEA"); wall.addColorStop(1, "#E4DED5");
+  g.fillStyle = wall; g.fillRect(0, 0, SIZE, SIZE);
+  const pool = g.createRadialGradient(SIZE / 2, SIZE * 0.42, 20, SIZE / 2, SIZE * 0.42, SIZE * 0.62); pool.addColorStop(0, "rgba(255,255,255,.75)"); pool.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = pool; g.fillRect(0, 0, SIZE, SIZE);
+  const horizon = Math.min(SIZE * 0.86, fy - SIZE * 0.045);
+  const table = g.createLinearGradient(0, horizon, 0, SIZE); table.addColorStop(0, "rgba(120,105,90,0)"); table.addColorStop(0.25, "rgba(120,105,90,.07)"); table.addColorStop(1, "rgba(120,105,90,.2)");
+  g.fillStyle = table; g.fillRect(0, horizon, SIZE, SIZE - horizon);
+  // reflection, fading with distance from the floor line
+  const r = document.createElement("canvas"); r.width = r.height = SIZE; const rg = r.getContext("2d"); rg.imageSmoothingQuality = "high";
+  rg.drawImage(mirror, 0, 0, SIZE, SIZE);
+  rg.globalCompositeOperation = "destination-in";
+  const fade = rg.createLinearGradient(0, fy - 10, 0, fy + SIZE * 0.2); fade.addColorStop(0, "rgba(0,0,0,.34)"); fade.addColorStop(1, "rgba(0,0,0,0)");
+  rg.fillStyle = fade; rg.fillRect(0, 0, SIZE, SIZE);
+  g.filter = "blur(1.2px)"; g.drawImage(r, 0, 0); g.filter = "none";
+  g.drawImage(main, 0, 0, SIZE, SIZE);
+  // gentle vignette
+  const vig = g.createRadialGradient(SIZE / 2, SIZE / 2, SIZE * 0.45, SIZE / 2, SIZE / 2, SIZE * 0.78); vig.addColorStop(0, "rgba(60,45,30,0)"); vig.addColorStop(1, "rgba(60,45,30,.12)");
+  g.fillStyle = vig; g.fillRect(0, 0, SIZE, SIZE);
+  return out.toDataURL("image/jpeg", 0.9);
+};
+window.pieceFiles = Object.keys(PIECES);
+window.ready = true;
+</script>

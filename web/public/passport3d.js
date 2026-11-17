@@ -3,6 +3,7 @@
 // The card is a three.js object; the badges are HTML placed over it each frame,
 // so their text stays sharp and readable. Mounted by app.js via the "wp:stage" event.
 import * as THREE from "./vendor/three.module.min.js";
+import { buildWatch, studioEnv, PIECES } from "./models3d.js";
 
 const BENEFITS = [
   { icon: "people", title: "Vouched-for members", line: "Invite-only, and every ID is checked in person." },
@@ -20,10 +21,9 @@ const ICON = {
   history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
   gift: '<rect x="3" y="9" width="18" height="12" rx="2"/><path d="M12 9v12M3 13h18M12 9c-2-4-7-4-6-1s6 1 6 1 5 2 6-1-4-3-6 1"/>',
 };
-// Jacket outline from the app's icon set (64x64 viewBox), drawn on the card.
-const WATCH = "M24 18V4h16v14 M24 46v14h16V46 M18 32a14 14 0 1 0 28 0a14 14 0 1 0 -28 0 M32 32v-8 M32 32l6 3 M46 30h3v4h-3";
 
-const ROSE = "#F0435A", INK = "#222222", MUTED = "#6A6A6A";
+const HOUSE = document.documentElement.dataset.look === "house";
+const ROSE = HOUSE ? "#7C5E2A" : "#F0435A", ROSE2 = HOUSE ? "#111315" : "#D70466", INK = HOUSE ? "#111315" : "#222222", MUTED = HOUSE ? "#4B525C" : "#6A6A6A";
 const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -44,14 +44,11 @@ function frontTexture() {
   const c = document.createElement("canvas"); c.width = 1024 * S; c.height = 1400 * S;
   const g = c.getContext("2d"); g.scale(S, S);
   g.fillStyle = "#fff"; g.fillRect(0, 0, 1024, 1400);
-  const band = g.createLinearGradient(0, 0, 1024, 0); band.addColorStop(0, ROSE); band.addColorStop(1, "#D70466");
+  const band = g.createLinearGradient(0, 0, 1024, 0); band.addColorStop(0, HOUSE ? "#111315" : ROSE); band.addColorStop(1, ROSE2);
   g.fillStyle = band; g.fillRect(0, 0, 1024, 190);
   g.fillStyle = "#fff"; g.font = FONT(800, 70); g.fillText("Passport", 70, 122);
   g.font = FONT(700, 46); g.textAlign = "right"; g.fillText("No. 4", 954, 120); g.textAlign = "left";
   roundRect(g, 70, 250, 884, 600, 40); g.fillStyle = "#F3EDE4"; g.fill();
-  g.save(); g.translate(512 - 220, 300); g.scale(6.9, 6.9);
-  g.strokeStyle = INK; g.lineWidth = 1.7; g.lineJoin = "round"; g.lineCap = "round"; g.stroke(new Path2D(WATCH));
-  g.restore();
   g.fillStyle = INK; g.font = FONT(800, 84); g.fillText("Seamaster (1968)", 70, 990);
   g.fillStyle = MUTED; g.font = FONT(600, 52); g.fillText("Omega · calibre 565", 70, 1066);
   g.fillStyle = INK; g.font = FONT(800, 56); g.fillText("$9.00", 70, 1230);
@@ -133,6 +130,12 @@ function mount(stage) {
   const back = new THREE.Mesh(faceGeometry(W - 0.02, H - 0.02, R), faceMat(backTexture()));
   back.position.z = -D / 2 - 0.017; back.rotation.y = Math.PI;
   card.add(body, front, back);
+  // The piece itself: a 3D watch sitting on the passport's picture panel.
+  scene.environment = studioEnv(gl);
+  body.material.envMapIntensity = 0.25; front.material.envMapIntensity = back.material.envMapIntensity = 0;
+  const watch = buildWatch({ ...PIECES["seamaster.jpg"], strapLen: 0.95, strapCurve: 0.3, layout: "flat" });
+  watch.scale.setScalar(0.34); watch.position.set(0, 0.36, D / 2 + 0.13); watch.rotation.z = -0.12;
+  card.add(watch);
   scene.add(card);
 
   // Soft shadow under the card

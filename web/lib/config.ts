@@ -96,12 +96,12 @@ export const PROTECTION_DEMO = {
   stakers: [["Grace", 3], ["Diego", 3], ["Kofi", 3]] as [string, number][],
   sales: [
     // Proven fake: stamped by Demo Pawn Shop, re-inspected by Second Opinion Jewelers.
-    { key: "P1", seller: "Tom", buyer: "Grace", shop: "shop", name: "Submariner-style diver", brand: "Unbranded", details: "Sold as a Seiko mod, 40 mm", icon: "watch", category: "watches", price: 4,
+    { key: "P1", seller: "Tom", buyer: "Grace", shop: "shop", photo: "diver.jpg", name: "Submariner-style diver", brand: "Unbranded", details: "Sold as a Seiko mod, 40 mm", icon: "watch", category: "watches", price: 4,
       claim: "A watchmaker opened the caseback: the movement is a clone, not the one listed.", fake: true, ruling: "Movement is a copy of the NH35. Not what was authenticated. Fake." },
     // Rejected claim: stamped by Second Opinion Jewelers, Demo Pawn Shop rules it genuine.
-    { key: "P2", seller: "Elena", buyer: "Diego", shop: "shop2", name: "Gold hoop earrings", brand: "Mejuri", details: "14k solid gold", icon: "ring", category: "jewelry", price: 3,
+    { key: "P2", seller: "Elena", buyer: "Diego", shop: "shop2", photo: "hoops.jpg", name: "Gold hoop earrings", brand: "Mejuri", details: "14k solid gold", icon: "ring", category: "jewelry", price: 3,
       claim: "The clasp looks plated to me.", fake: false, ruling: "Acid test and hallmark match 14k solid gold. Genuine." },
     // Live cover with days left.
-    { key: "P3", seller: "Sam", buyer: "Priya", shop: "shop", name: "Seiko Presage cocktail", brand: "Seiko", details: "SRPB43, 40 mm", icon: "watch", category: "watches", price: 3 },
+    { key: "P3", seller: "Sam", buyer: "Priya", shop: "shop", photo: "presage.jpg", name: "Seiko Presage cocktail", brand: "Seiko", details: "SRPB43, 40 mm", icon: "watch", category: "watches", price: 3 },
   ],
 } as const;
