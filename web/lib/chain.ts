@@ -245,7 +245,44 @@ export async function readProtectionSafe(chain: { items: any[]; partners: any[];
   }
 }
 /** After an action, the next read must be fresh. */
-export const forgetProtection = () => { g3.__wpProt = undefined; };
+export const forgetProtection = () => { g3.__wpProt = undefined; g4.__wpGen = (g4.__wpGen ?? 0) + 1; if (g4.__wpSnap) g4.__wpSnap.at = 0; };
+/** Also drop the categories and specialists (after the admin approves one from the browser). */
+export const forgetAll = () => { forgetProtection(); forgetProtectionCache(); };
+
+// ---------------------------------------------------------------- snapshot
+// Every screen polls /api/state. Without this, each poll from each open tab re-read the
+// whole chain, Arc's public RPC throttled the server, and reads piled up until they timed out.
+// Now there is one chain read at a time per server, shared by everyone and reused for a
+// few seconds. If Arc is slow or refuses, the last good snapshot is served instead.
+type Snap = { at: number; data: any };
+const g4 = globalThis as unknown as { __wpSnap?: Snap; __wpSnapLoad?: Promise<any> | null; __wpGen?: number };
+const FRESH_MS = 10_000;
+const WAIT_MS = 20_000;
+
+export async function snapshot(load: () => Promise<any>): Promise<any> {
+  const deadline = Date.now() + WAIT_MS;
+  for (;;) {
+    const have = g4.__wpSnap;
+    if (have?.data && Date.now() - have.at < FRESH_MS) return have.data;
+    if (!g4.__wpSnapLoad) {
+      const gen = g4.__wpGen ?? 0;
+      g4.__wpSnapLoad = load()
+        // If something changed on Arc while this read was running, keep it only as a fallback.
+        .then((data) => { g4.__wpSnap = { at: (g4.__wpGen ?? 0) === gen ? Date.now() : 0, data }; })
+        .finally(() => { g4.__wpSnapLoad = null; });
+    }
+    const loading = g4.__wpSnapLoad;
+    if (!have?.data) { await loading; if (!g4.__wpSnap?.data) throw new Error("chain read failed"); continue; }
+    // Something older exists: don't keep people waiting on a slow chain.
+    const left = deadline - Date.now();
+    if (left <= 0) return have.data;
+    const ok = await Promise.race([
+      loading.then(() => true, (e) => { console.error("chain read failed, serving the last snapshot", e); return false; }),
+      sleep(left).then(() => false),
+    ]);
+    if (!ok) return have.data;
+  }
+}
 
 const COVER_STATES = ["pending", "active", "claimed", "paid", "rejected", "expired", "void"];
 
