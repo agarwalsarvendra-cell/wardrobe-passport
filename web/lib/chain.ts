@@ -197,13 +197,13 @@ async function protectionSetup(partnerAddrs: string[]) {
   if (c && c.key === key && Date.now() - c.at < 20_000) return c.data;
   const p = protection();
   const keys: string[] = await p.getCategories();
-  const cats = await pool(keys, (k) => p.categories(k));
+  const cats = await gentle(keys, (k) => p.categories(k));
   const categories = keys.map((k, i) => ({ key: catName(k), name: cats[i].name, baseBps: Number(cats[i].baseBps), active: cats[i].active }));
   const pairs: [string, string][] = [];
   for (const a of partnerAddrs) for (const k of keys) pairs.push([a, k]);
-  const isSpec = await pool(pairs, ([a, k]) => p.specialistIn(a, k));
+  const isSpec = await gentle(pairs, ([a, k]) => p.specialistIn(a, k));
   const specPairs = pairs.filter((_, i) => isSpec[i]);
-  const creds = await pool(specPairs, ([a, k]) => p.credentialOf(a, k));
+  const creds = await gentle(specPairs, ([a, k]) => p.credentialOf(a, k));
   const specialists: Record<string, Record<string, { credential: string }>> = {};
   specPairs.forEach(([a, k], i) => { (specialists[a.toLowerCase()] ??= {})[catName(k)] = { credential: creds[i] }; });
   const data = { categories, specialists };
@@ -211,6 +211,41 @@ async function protectionSetup(partnerAddrs: string[]) {
   return data;
 }
 export const forgetProtectionCache = () => { g2.__wpPCache = undefined; };
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** A contract revert carries data; anything else (rate limit, timeout, network) is worth another try. */
+const isRevert = (e: any) => e?.code === "CALL_EXCEPTION" || !!e?.data || !!e?.info?.error?.data;
+async function retry<R>(fn: () => Promise<R>, orNull = false): Promise<R> {
+  for (let i = 0; ; i++) {
+    try { return await fn(); } catch (e) {
+      if (isRevert(e)) { if (orNull) return null as R; throw e; }
+      if (i >= 3) throw e;
+      await sleep(250 * (i + 1));
+    }
+  }
+}
+const gentle = <T, R>(list: T[], fn: (x: T) => Promise<R>, orNull = false) => pool(list, (x) => retry(() => fn(x), orNull), 4);
+
+const g3 = globalThis as unknown as { __wpProt?: { at: number; data: any } };
+/**
+ * readProtection, but it never breaks the page: a result is reused for a few seconds
+ * (the screens poll), and if Arc refuses the read the last good result is shown.
+ */
+export async function readProtectionSafe(chain: { items: any[]; partners: any[]; members: any[] }, people: string[]) {
+  if (!protectionOn()) return null;
+  const c = g3.__wpProt;
+  if (c && Date.now() - c.at < 4_000) return c.data;
+  try {
+    const data = await readProtection(chain, people);
+    g3.__wpProt = { at: Date.now(), data };
+    return data;
+  } catch (e) {
+    console.error("protection read failed", e);
+    return c?.data ?? null;
+  }
+}
+/** After an action, the next read must be fresh. */
+export const forgetProtection = () => { g3.__wpProt = undefined; };
 
 const COVER_STATES = ["pending", "active", "claimed", "paid", "rejected", "expired", "void"];
 
@@ -227,19 +262,20 @@ export async function readProtection(chain: { items: any[]; partners: any[]; mem
   const specCats: [string, string][] = [];
   for (const [a, cats] of Object.entries(setup.specialists as Record<string, any>)) for (const k of Object.keys(cats)) specCats.push([a, k]);
 
-  const [catOf, quotes, covers, shopRows, fakesIn, shares, values, rates, fakesSold, rejected] = await Promise.all([
-    pool(ids, (id) => p.categoryOf(id)),
-    pool(quoteIds, (id) => p.quote(id)),
-    pool(coverIds, (id) => p.getCover(id)),
-    pool(partnerAddrs, (a) => p.shopStats(a)),
-    pool(specCats, ([a, k]) => p.fakesStampedIn(a, catKey(k))),
-    pool(memberAddrs, (a) => p.sharesOf(a)),
-    pool(memberAddrs, (a) => p.stakeValue(a)),
-    // A member's own rate as a seller: base for watches + their record + their inviter's (no authenticator part).
-    pool(memberAddrs, (a) => p.rate(a, ethers.ZeroAddress, catKey("watches")).catch(() => null)),
-    pool(memberAddrs, (a) => p.fakesSoldBy(a)),
-    pool(memberAddrs, (a) => p.claimsRejectedOf(a)),
-  ]);
+  // One group after another, a few calls at a time, each retried: the public Arc RPC
+  // refuses bursts, and one refused call must not take the whole page down.
+  const catOf = await gentle(ids, (id) => p.categoryOf(id));
+  const quotes = await gentle(quoteIds, (id) => p.quote(id));
+  const covers = await gentle(coverIds, (id) => p.getCover(id));
+  const shopRows = await gentle(partnerAddrs, (a) => p.shopStats(a));
+  const fakesIn = await gentle(specCats, ([a, k]) => p.fakesStampedIn(a, catKey(k)));
+  const shares = await gentle(memberAddrs, (a) => p.sharesOf(a));
+  // A member's own rate as a seller: base for watches + their record + their inviter's (no authenticator part).
+  const rates = await gentle(memberAddrs, (a) => p.rate(a, ethers.ZeroAddress, catKey("watches")), true);
+  const fakesSold = await gentle(memberAddrs, (a) => p.fakesSoldBy(a));
+  const rejected = await gentle(memberAddrs, (a) => p.claimsRejectedOf(a));
+  // What a stake is worth = its share of the pool (same sum the contract's stakeValue does).
+  const values = shares.map((sh: bigint) => (BigInt(poolRaw[5]) === 0n ? 0n : (sh * BigInt(poolRaw[0])) / BigInt(poolRaw[5])));
 
   const categoryOf: Record<number, string> = {};
   catOf.forEach((k: string, i: number) => { const n = catName(k); if (n) categoryOf[ids[i]] = n; });

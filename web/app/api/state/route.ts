@@ -1,10 +1,11 @@
-import { readProtection, readState } from "@/lib/chain";
+import { readProtectionSafe, readState } from "@/lib/chain";
 import { currentSession } from "@/lib/auth";
 import { q } from "@/lib/db";
 import { safely } from "@/lib/http";
 import { allUsers } from "@/lib/users";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // Items, histories, members, disputes and track records, read from Arc. Members also get
 // the ledger (every action with its Arc transaction), flags and authentication requests.
@@ -15,7 +16,7 @@ export async function GET() {
     const users = signedIn ? await allUsers() : [];
     const chain = await readState(users.map((u) => u.address));
     const [prot, metaRows] = await Promise.all([
-      readProtection(chain, users.filter((u) => u.role === "member").map((u) => u.address)),
+      readProtectionSafe(chain, users.filter((u) => u.role === "member").map((u) => u.address)),
       q("select item_id, category from piece_meta"),
     ]);
     const categories: Record<number, string> = {};

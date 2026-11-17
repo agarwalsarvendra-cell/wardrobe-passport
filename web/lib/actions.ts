@@ -4,7 +4,7 @@
 import { createHash } from "crypto";
 import { ethers } from "ethers";
 import { CATEGORIES, CFG, RULES } from "./config";
-import { catKey, contract, iface, piface, protection, protectionOn, rpc } from "./chain";
+import { catKey, contract, forgetProtection, iface, piface, protection, protectionOn, rpc } from "./chain";
 import { q } from "./db";
 import { UserError } from "./errors";
 import { getUser, treasury, type User } from "./users";
@@ -204,6 +204,7 @@ async function protectionAction(user: User, action: string, body: any) {
     default: throw new UserError("Unknown action.");
   }
   const res = await send(user, fn, args, value, "protection");
+  forgetProtection();
   await logActivity(res.hash, action, id, user.handle, detail, res.feeWei);
   return { hash: res.hash, fee: res.feeWei?.toString() ?? null, id };
 }
@@ -224,6 +225,7 @@ export async function settleCover(before: { id: number; buyer: string; paidAt: n
     const data = piface.encodeFunctionData(fn, [cid]);
     try { await rpc().call({ from: t.address, to: CFG.protection, data }); } catch { continue; } // not this one
     const res = await wallets().execute(t, CFG.protection, data, 0n);
+    forgetProtection();
     await logActivity(res.hash, fn === "activate" ? "coverActivated" : "coverVoided", before.id, "treasury", { cover: cid }, res.feeWei);
     return;
   }
@@ -365,6 +367,7 @@ export async function perform(user: User, action: string, body: any) {
   }
   await q("insert into activity (tx_hash, action, item_id, actor, detail, fee_wei) values ($1,$2,$3,$4,$5,$6)",
     [res.hash, action, id, user.handle, JSON.stringify(detail), res.feeWei?.toString() ?? null]);
+  forgetProtection();
   if (before) await afterFirstDelivery(user, before).catch((e) => console.warn("credits", e));
   if (action === "authenticate") await certifyAfterAuth(user, id!).catch((e) => console.warn("certify", e));
   if (sale && !ZERO.test(sale.buyer)) {
