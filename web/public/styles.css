@@ -1065,3 +1065,15 @@ button.shop-card:not(:disabled):hover { box-shadow: 0 8px 24px rgba(0,0,0,.16); 
 .paid-claim { margin: 0 0 16px; } .paid-claim > b { font-size: 16px; } .paid-claim > span { color: var(--muted); font-size: 14px; margin-left: 8px; }
 @keyframes payout-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @media (prefers-reduced-motion: reduce) { .payout-bar span { animation: none; } }
+
+/* Landing: the 3D piece with the refund split under it */
+.hero-show { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.hero-show .stage3d { height: 400px; }
+.hero-refund { max-width: 520px; width: 100%; margin: 0 auto; }
+.hero-refund-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 14px; color: var(--muted); padding: 0 4px; }
+.hero-refund-top b { color: var(--ink); font-weight: 800; }
+.hero-refund-top .linkish { font-size: 14px; font-weight: 700; white-space: nowrap; }
+.hero-refund .payout { margin-top: 8px; box-shadow: var(--lift); border-style: solid; }
+.orb { box-shadow: 0 6px 20px rgba(0,0,0,.14); border: 1px solid var(--line); }
+.orb-text b { font-size: 15px; }
+@media (max-width: 640px) { .hero-show .stage3d { height: auto; } .hero-show .stage3d canvas { height: 320px; } }

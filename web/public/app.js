@@ -596,12 +596,34 @@
             </div>
           </div>
         </div>
-        <div class="stage3d" tabindex="0" aria-label="3D passport with a watch on it and the benefits of joining. Drag or use the arrow keys to spin it." title="Drag to spin">
-          <canvas aria-hidden="true"></canvas>
-          <div class="orbit"></div>
+        <div class="hero-show">
+          <div class="stage3d" tabindex="0" aria-label="A pre-owned watch in 3D with three promises beside it. Drag or use the arrow keys to turn it." title="Drag to turn">
+            <canvas aria-hidden="true"></canvas>
+            <div class="orbit"></div>
+          </div>
+          <div id="hero-refund" class="hero-refund"></div>
         </div>
       </section>`;
     window.dispatchEvent(new Event("wp:stage"));
+  }
+
+  /** Under the 3D piece: where the money comes from if that piece is proven fake. Real figures for a real listing when there is one. */
+  function renderHeroRefund() {
+    const el = $("#hero-refund"); if (!el) return;
+    const ok = (i) => i.status === STATUS.LISTED && prot() && certified(i) && quoteOf(i) && SEED_ART[i.name];
+    const pool = (state.items || []).filter(ok);
+    const item = pool.find((i) => SEED_ART[i.name] === "seamaster") || pool.find((i) => /watch/.test(catOf(i) || "")) || pool[0];
+    let html;
+    if (item) {
+      html = `<div class="hero-refund-top"><span><b>${esc(item.name)}</b> · ${usd(item.price)}</span><button class="linkish" data-open="${item.id}">See this piece</button></div>${payoutBar({ amount: item.price, shop: item.authBy }, true)}`;
+      const file = `${SEED_ART[item.name]}.jpg`;
+      if (el.dataset.piece !== file) { el.dataset.piece = file; const st = $(".stage3d"); if (st) st.dataset.piece = file; window.dispatchEvent(new CustomEvent("wp:hero-piece", { detail: file })); }
+    } else {
+      html = `<div class="payout preview"><div class="payout-head">If a piece is proven fake, the buyer gets the full price back</div>
+        <div class="payout-bar" role="img" aria-label="Half from the authenticator's bond, half from the members' pool"><span class="pb-bond" style="width:50%"></span><span class="pb-pool" style="width:50%"></span></div>
+        <div class="payout-legend"><span><i class="pb-bond"></i><b>Half</b> from the authenticator’s bond</span><span><i class="pb-pool"></i><b>Half</b> from the members' pool</span></div></div>`;
+    }
+    if (el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; }
   }
 
   function renderLanding() {
@@ -1448,8 +1470,7 @@
       <span class="live ${state.online ? "" : "down"}">${state.online ? `Live on ${esc(CFG.chainName)}` : "Reconnecting to Arc…"}</span><span>·</span>
       <a href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">Contract ${short(CFG.contractAddress)} ↗</a><span>·</span>
       <button class="linkish foot-link" data-action="how">How it works</button><span>·</span>
-      <span>${CFG.walletProvider === "circle" ? "Wallets by Circle · " : ""}Test dollars on Arc Testnet</span><span>·</span>
-      <a class="foot-look" href="?look=${document.documentElement.dataset.look === "house" ? "classic" : "house"}">${document.documentElement.dataset.look === "house" ? "Switch to the standard look" : "Preview the auction-house look"}</a>`;
+      <span>${CFG.walletProvider === "circle" ? "Wallets by Circle · " : ""}Test dollars on Arc Testnet</span>`;
   }
 
   function render() {
@@ -1469,6 +1490,7 @@
     if (!state.loaded) { view.dataset.sig = ""; view.innerHTML = `<div class="loading"><div class="spinner"></div>Connecting to Arc…</div>`; return; }
     if (state.publicId) { $("#hero").innerHTML = ""; const h = renderPublic(state.publicId); if (view.dataset.sig !== h) { view.innerHTML = h; view.dataset.sig = h; } return; }
     renderHero();
+    renderHeroRefund();
     document.body.classList.toggle("signed-out", !signedIn());
     if (!signedIn()) {
       const html = renderLanding();
