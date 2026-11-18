@@ -1172,3 +1172,9 @@ body:not(.signed-out) .top-link:not(.how) { display: none; }
 .how-bond b { display: block; font-size: 20px; font-weight: 800; color: var(--ink); }
 .how-bond small { color: var(--muted); font-size: 13px; }
 @media (max-width: 640px) { .how-bond { grid-template-columns: 1fr 1fr; } }
+
+/* Community and Sold pass (Nov 18): community opens in its own window */
+.backdrop .community { margin-top: 0; }
+.backdrop .community-head { margin-top: 0; }
+.backdrop #community-h { display: none; }
+.try-more { display: block; margin-top: 10px; font-size: 14px; font-weight: 700; color: var(--ink); }

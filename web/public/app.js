@@ -562,15 +562,19 @@
   const CATS = [["all", "All", null], ["watches", "Watches", "watch"], ["vintage-watches", "Vintage watches", "watch"], ["jewelry", "Jewelry", "ring"], ["handbags", "Handbags", "bag"]];
   const ICON_CAT = { watch: "watches", ring: "jewelry", bag: "handbags" };
   const GRID_ICON = '<rect x="10" y="10" width="18" height="18" rx="4"/><rect x="36" y="10" width="18" height="18" rx="4"/><rect x="10" y="36" width="18" height="18" rx="4"/><rect x="36" y="36" width="18" height="18" rx="4"/>';
+  const SOLD_ICON = '<path d="M10 34 34 10h20v20L30 54z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><circle cx="44" cy="20" r="4" fill="none" stroke="currentColor" stroke-width="4"/>';
   const matches = (i) => {
-    if (state.cat !== "all" && (catOf(i) || ICON_CAT[iconKey(i.imageUrl)]) !== state.cat) return false;
+    if (state.cat !== "all" && state.cat !== "sold" && (catOf(i) || ICON_CAT[iconKey(i.imageUrl)]) !== state.cat) return false;
     const q = state.q.trim().toLowerCase();
     return !q || `${i.name} ${i.brand} ${i.details}`.toLowerCase().includes(q);
   };
-  function chipsHtml() {
-    return `<div class="cats" aria-label="Categories">${CATS.map(([k, label, ic]) => `
-      <button class="cat ${state.cat === k ? "on" : ""}" data-cat="${k}" aria-pressed="${state.cat === k}">
-        <svg viewBox="0 0 64 64" aria-hidden="true">${ic ? ICONS[ic].svg : GRID_ICON}</svg><span>${label}</span></button>`).join("")}</div>`;
+  // withSold: the landing page adds a "Sold" tab that shows recently sold pieces.
+  function chipsHtml(withSold = false) {
+    const list = withSold ? [...CATS, ["sold", "Sold", "sold"]] : CATS;
+    const on = (k) => state.cat === k || (!withSold && k === "all" && state.cat === "sold");
+    return `<div class="cats" aria-label="Categories">${list.map(([k, label, ic]) => `
+      <button class="cat ${on(k) ? "on" : ""}" data-cat="${k}" aria-pressed="${on(k)}">
+        <svg viewBox="0 0 64 64" aria-hidden="true">${ic === "sold" ? SOLD_ICON : ic ? ICONS[ic].svg : GRID_ICON}</svg><span>${label}</span></button>`).join("")}</div>`;
   }
   function renderSearch() {
     const el = $("#search");
@@ -609,6 +613,7 @@
               <button class="try-btn" data-demo="maya"><b>Seller</b><small>Add a piece and list it</small></button>
               <button class="try-btn" data-demo="shop"><b>Authenticator</b><small>Check pieces and back them</small></button>
             </div>
+            <button class="linkish try-more" data-action="community">Or try it as any member</button>
           </details>
         </div>
         <div class="hero-show">
@@ -640,19 +645,18 @@
   }
 
   function renderLanding() {
-    const live = listedNow().filter(matches).reverse();
-    const sold = recentlySold().filter(matches).reverse();
+    const showSold = state.cat === "sold";
+    const live = (showSold ? recentlySold() : listedNow()).filter(matches).reverse();
     const filtering = state.q.trim() || state.cat !== "all";
     return `
       <div class="intro" id="browse">
         <div><h2>Browse pieces</h2></div>
       </div>
-      ${chipsHtml()}
+      ${chipsHtml(true)}
       ${live.length ? `<div class="lgrid">${live.map((i) => card(i, "")).join("")}</div>`
-        : `<div class="empty slim"><p>${filtering ? "Nothing matches. Try another category or search." : "Nothing for sale yet."}</p></div>`}
-      ${sold.length ? `<h3 class="grid-h">Recently sold</h3><div class="lgrid">${sold.map((i) => card(i, "")).join("")}</div>` : ""}
+        : `<div class="empty slim"><p>${filtering ? "Nothing matches. Try another category or search." : (showSold ? "Nothing sold yet." : "Nothing for sale yet.")}</p></div>`}
       ${buyStepsHtml()}
-      ${communityHtml()}`;
+`;
   }
 
   // The people in the community. Each one can be used to try the app (demo sign-in).
@@ -1479,6 +1483,7 @@
       <span class="live ${state.online ? "" : "down"}">${state.online ? `Live on ${esc(CFG.chainName)}` : "Reconnecting to Arc…"}</span><span>·</span>
       <a href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">Contract ${short(CFG.contractAddress)} ↗</a><span>·</span>
       <button class="linkish foot-link" data-action="how">How it works</button><span>·</span>
+      <button class="linkish foot-link" data-action="community">Community</button><span>·</span>
       <button class="linkish foot-link" data-action="help">Help and contact</button><span>·</span>
       <span>${CFG.walletProvider === "circle" ? "Wallets by Circle · " : ""}Test dollars on Arc Testnet</span>`;
   }
@@ -2339,6 +2344,7 @@
       case "add-item": openAddItem(); break;
       case "how": openHow(); break;
       case "help": openHelp(); break;
+      case "community": { const c = communityHtml(); openModal("Meet the community", c || `<p class="hint">No members to show yet.</p>`); break; }
       case "add-money": openAddMoney(); break;
       case "copy-addr": copy(state.me?.address, "Account number copied."); break;
       case "copy-link": copy(passportUrl(id), "Passport link copied."); break;
