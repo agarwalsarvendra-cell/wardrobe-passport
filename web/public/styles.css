@@ -1164,7 +1164,7 @@ body:not(.signed-out) .top-link:not(.how) { display: none; }
 
 /* Stats pass (Nov 18): promises stacked, one quiet stats line, bond figures in How it works */
 .hero-promises { flex-direction: column; gap: 8px; }
-.hero-stats { margin: 16px 0 0; font-size: 14px; color: var(--muted); }
+.why-copy > .hero-stats { margin: 16px 0 0; font-size: 14px; line-height: 1.4; color: var(--muted); max-width: none; }
 .hero-stats:empty { display: none; }
 .how-bond-p { margin: 0 0 12px; color: var(--muted); font-size: 14.5px; line-height: 1.5; }
 .how-bond { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
