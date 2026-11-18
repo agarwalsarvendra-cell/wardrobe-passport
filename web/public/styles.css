@@ -1077,3 +1077,81 @@ button.shop-card:not(:disabled):hover { box-shadow: 0 8px 24px rgba(0,0,0,.16); 
 .orb { box-shadow: 0 6px 20px rgba(0,0,0,.14); border: 1px solid var(--line); }
 .orb-text b { font-size: 15px; }
 @media (max-width: 640px) { .hero-show .stage3d { height: auto; } .hero-show .stage3d canvas { height: 320px; } }
+
+/* Top bar: How it works and Help, always one click away */
+.top-right { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 0; }
+.top-links { display: flex; align-items: center; gap: 4px; }
+.top-link { display: inline-flex; align-items: center; gap: 7px; border: 0; background: none; font: inherit; font-weight: 700; font-size: 15px; color: var(--ink); padding: 9px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.top-link:hover { background: #F4F4F4; }
+.top-link.how { background: #FFF0F3; color: #C2183F; border: 1px solid #FFD3DC; }
+.top-link.how:hover { background: #FFE3E9; }
+.top-link svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.top-link:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.why-how { margin-left: 6px; font-weight: 700; color: var(--ink); align-self: center; }
+@media (max-width: 1100px) { .top-link:not(.how) { display: none; } }
+@media (max-width: 640px) { .top-link.how span { display: none; } .top-link.how { padding: 9px; } .top-right { gap: 8px; } }
+
+/* How it works and Help */
+.how-short { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+.how-short div { border: 1px solid var(--line); border-radius: 14px; padding: 14px; background: #FFF8F9; }
+.how-short b { display: block; font-size: 16px; font-weight: 800; margin-bottom: 4px; }
+.how-short p { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.45; }
+.how-steps { margin: 6px 0 14px; padding: 0; list-style: none; counter-reset: how; }
+.how-steps li { counter-increment: how; position: relative; padding: 0 0 14px 42px; }
+.how-steps li::before { content: counter(how); position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: #fff; font-weight: 800; font-size: 14px; display: grid; place-items: center; }
+.how-steps li:not(:last-child)::after { content: ""; position: absolute; left: 13px; top: 32px; bottom: 4px; width: 2px; background: var(--line); }
+.how-steps b { display: block; font-size: 16px; font-weight: 800; }
+.how-steps p { margin: 2px 0 0; font-size: 14.5px; color: var(--muted); line-height: 1.5; }
+.faq details { border-bottom: 1px solid var(--line); padding: 12px 0; }
+.faq summary { cursor: pointer; font-weight: 800; font-size: 16px; list-style-position: outside; }
+.faq p { margin: 8px 0 0; color: var(--muted); line-height: 1.5; font-size: 15px; }
+.contact-box { margin-top: 16px; border: 1px solid var(--line); border-radius: 14px; padding: 14px; background: #FFF8F9; }
+.contact-box p { margin: 4px 0 10px; color: var(--muted); font-size: 15px; }
+@media (max-width: 640px) { .how-short { grid-template-columns: 1fr; } }
+
+.backdrop { z-index: 200; }
+.faq summary { list-style-position: inside; }
+.topbar-inner { grid-template-columns: auto minmax(160px, 420px) auto; justify-content: space-between; gap: 16px; }
+body:not(.signed-out) .top-link:not(.how) { display: none; }
+@media (max-width: 847px) { .topbar-inner { grid-template-columns: auto 1fr; } }
+@media (max-width: 847px) {
+  .topbar-inner { grid-template-columns: minmax(0, 1fr) auto; }
+  .brand { min-width: 0; overflow: hidden; }
+  .brand > div { min-width: 0; }
+  .brand h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* ---------------------------------------------------------------
+   Declutter pass (Nov 18): fewer competing elements on the landing page.
+   One accent (rose), neutral surfaces, more room between sections.
+   --------------------------------------------------------------- */
+/* Hero: the 3D watch stands on its own, no floating labels over it */
+.stage3d:not(.no3d) .orbit { display: none; }
+.why-cta .btn { padding: 14px 28px; }
+
+/* Demo roles: one quiet link that opens the three choices */
+.try-as { margin-top: 20px; padding-top: 0; border-top: 0; }
+.try-as > summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none;
+  font-size: 15px; font-weight: 700; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.try-as > summary::-webkit-details-marker { display: none; }
+.try-as > summary::after { content: "▾"; font-size: 12px; transition: transform .15s ease; }
+.try-as[open] > summary::after { transform: rotate(180deg); }
+.try-as[open] .try-row { margin-top: 12px; }
+
+/* Greens back to neutral outside of real success states */
+.pitch { background: #F7F7F7; }
+.pitch-facts b { color: var(--ink); }
+.person-card small { color: var(--muted); font-weight: 600; }
+
+/* More space between sections, less inside them */
+.intro { padding-top: 64px; }
+.grid-h { margin-top: 64px; }
+.buy-steps { margin-top: 96px; }
+.community { margin-top: 96px; border-top: 0; padding-top: 0; }
+.pitch { margin-top: 96px; }
+.lcard-sub { margin-top: 2px; }
+@media (max-width: 760px) {
+  .intro { padding-top: 40px; }
+  .grid-h { margin-top: 48px; }
+  .buy-steps, .community, .pitch { margin-top: 64px; }
+}

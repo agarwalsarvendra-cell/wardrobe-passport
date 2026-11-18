@@ -471,6 +471,15 @@
     const shop = partnerOf(item.authBy);
     const sold = item.status === STATUS.OWNED && (state.histories[item.id] || []).some((t) => !isZero(t.from));
     const price = item.status === STATUS.LISTED ? usd(item.price) : sold ? `Sold ${usd(facts(item).lastSale.price)}` : "";
+    const browse = footer === ""; // browse grids show only name, price and brand; the rest is on the listing page
+    if (browse) return `
+      <button class="lcard" data-open="${item.id}" aria-label="Open ${esc(item.name)}">
+        <div class="lcard-img">${art(item)}
+          ${item.status === STATUS.DISPUTED ? `<span class="lbadge warn">In dispute</span>` : sold ? `<span class="lbadge muted">Sold</span>` : ""}
+        </div>
+        <div class="lcard-row"><b>${esc(item.name)}</b>${price ? `<span>${price}</span>` : ""}</div>
+        <div class="lcard-sub">${esc(item.brand || "No brand")}</div>
+      </button>`;
     return `
       <button class="lcard" data-open="${item.id}" aria-label="Open ${esc(item.name)}">
         <div class="lcard-img">${art(item)}
@@ -586,15 +595,15 @@
         <div class="why-copy">
           <h2 id="why-h">Pre-owned watches and jewelry you can trust</h2>
           <p>A specialist checks every piece in person and stakes money on that check. Your payment is held until the piece arrives.</p>
-          <div class="row why-cta"><a class="btn gold" href="#browse" data-scroll="browse">Browse pieces</a><button class="btn ghost" data-action="open-signin">Sign in</button></div>
-          <div class="try-as">
-            <span>New here? Try the demo as a</span>
+          <div class="row why-cta"><a class="btn gold" href="#browse" data-scroll="browse">Browse pieces</a></div>
+          <details class="try-as">
+            <summary>Try the demo</summary>
             <div class="try-row">
               <button class="try-btn" data-demo="alex"><b>Buyer</b><small>Buy a piece and add protection</small></button>
               <button class="try-btn" data-demo="maya"><b>Seller</b><small>Add a piece and list it</small></button>
               <button class="try-btn" data-demo="shop"><b>Authenticator</b><small>Check pieces and back them</small></button>
             </div>
-          </div>
+          </details>
         </div>
         <div class="hero-show">
           <div class="stage3d" tabindex="0" aria-label="A pre-owned watch in 3D with three promises beside it. Drag or use the arrow keys to turn it." title="Drag to turn">
@@ -642,8 +651,7 @@
       ${sold.length ? `<h3 class="grid-h">Recently sold</h3><div class="lgrid">${sold.map((i) => card(i, "")).join("")}</div>` : ""}
       ${buyStepsHtml()}
       ${communityHtml()}
-      ${protectionPitchHtml()}
-      ${explainHtml()}`;
+      ${protectionPitchHtml()}`;
   }
 
   // The people in the community. Each one can be used to try the app (demo sign-in).
@@ -900,7 +908,7 @@
   function renderShop() {
     const forSale = listedNow().filter((i) => !same(i.owner, myAddr())).filter(matches).reverse();
     const capNote = !isVerified(myAddr()) && !readOnly() ? `<p class="tip boxed">You can buy pieces up to $50 until your ID is checked.</p>` : "";
-    const pnote = prot() ? `<p class="fine">Pieces marked “Bond-backed” can be protected for 90 days after delivery. Open one to see its price and why.</p>` : "";
+    const pnote = prot() ? `<p class="fine">Pieces can be protected for 90 days after delivery. Open one to see its price and why.</p>` : "";
     return `${moneyTip()}${capNote}${chipsHtml()}${pnote}
       ${forSale.length ? `<div class="lgrid">${forSale.map((i) => card(i, "")).join("")}</div>`
         : `<div class="empty slim"><p>${state.q || state.cat !== "all" ? "Nothing matches. Try another category or search." : "Nothing for sale right now."}</p></div>`}`;
@@ -1470,6 +1478,7 @@
       <span class="live ${state.online ? "" : "down"}">${state.online ? `Live on ${esc(CFG.chainName)}` : "Reconnecting to Arc…"}</span><span>·</span>
       <a href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">Contract ${short(CFG.contractAddress)} ↗</a><span>·</span>
       <button class="linkish foot-link" data-action="how">How it works</button><span>·</span>
+      <button class="linkish foot-link" data-action="help">Help and contact</button><span>·</span>
       <span>${CFG.walletProvider === "circle" ? "Wallets by Circle · " : ""}Test dollars on Arc Testnet</span>`;
   }
 
@@ -2012,19 +2021,55 @@
     `);
   }
 
+  // Shown publicly in Help. Leave a value empty to hide that line.
+  const CONTACT = { name: "Sarvendra Agarwal", email: "", linkedin: "" };
+
   function openHow() {
-    openModal("How it works on Arc", `
-      <ol class="how-list">
-        <li><strong>A closed community.</strong> You join only with an invite link from a member. The contract records who invited whom, and only members can trade.</li>
-        <li><strong>ID checked in person.</strong> To sell, a member shows a photo ID at a partner authenticator, which records the check on Arc. New members can buy up to $50 until then.</li>
-        <li><strong>Every piece gets a passport.</strong> A specialist in its category (watches, vintage watches, jewelry) authenticates it in person before it can be listed.</li>
-        <li><strong>Payment is held, not sent.</strong> The buyer's dollars go into the contract. The seller locks a 10% deposit.</li>
-        <li><strong>Disputes go to the community.</strong> The buyer posts a 5% bond. Five ID-checked members are drawn at random, never anyone connected to the sale. The authenticator files an inspection report. The first side to 3 votes wins, and the contract pays out. Members who voted with the outcome share 2% of the price.</li>
-        ${prot() ? `<li><strong>Authenticators back their stamp with money.</strong> Each stakes a bond. Buyers can add 90 days of protection after delivery, priced on Arc from the seller's record, the record of whoever invited them, and the authenticator's record in that category. If a second specialist proves a piece fake, the bond pays half and a pool funded by members pays half. This is community protection on test dollars, not a licensed product.</li>` : ""}
-        <li><strong>Everyone can check.</strong> The community ledger links every action to its transaction on Arc. Track records, including how the people you invited behaved, can't be edited.</li>
-        <li><strong>Why Arc.</strong> USDC is the native currency, so fees are in dollars and cost about a cent.</li>
-      </ol>
-      <div class="row" style="margin-top:6px"><a class="btn ghost" href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">See the contract on Arc ↗</a><button class="btn primary" data-close>Got it</button></div>
+    const p = !!prot();
+    const short3 = [
+      ["Checked in person", "A specialist inspects every piece before it can be listed, and stakes money on that check."],
+      ["Money held until it arrives", "Your payment sits in the contract. The seller is paid only after you confirm delivery."],
+      ["Refunded if it's fake", p ? "Add 90-day protection. If a second specialist proves it fake, the bond and the members' pool pay you back." : "If something is wrong, five members drawn at random decide and the contract pays out."],
+    ];
+    const steps = [
+      ["Join by invitation", "A member sends you an invite link. The contract records who invited whom, and only members can trade."],
+      ["Show ID once, in person", "To sell, you show a photo ID at a partner authenticator. Until then you can buy up to $50."],
+      ["Every piece gets a passport", "A specialist in its category (watches, vintage watches, jewelry) authenticates it in person. The passport keeps every check, owner and price."],
+      ["Pay, and the money is held", "The buyer's dollars go into the contract, not to the seller. The seller locks a 10% deposit and ships."],
+      ["Confirm, or open a dispute", "Happy? Confirm and the seller is paid. If not, post a 5% bond: five ID-checked members with no link to the sale vote, and the first side to 3 votes wins."],
+      ...(p ? [["Add 90-day protection", "Optional, after you pay. The price is worked out from the seller's record, their inviter's record and the authenticator's record. If a second specialist proves the piece fake, the authenticator's bond pays half and a pool funded by members pays half."]] : []),
+      ["Check it yourself", "The community ledger links every action to its transaction on Arc. Track records can't be edited."],
+    ];
+    openModal("How it works", `
+      <div class="how-short">${short3.map(([t, d]) => `<div><b>${t}</b><p>${d}</p></div>`).join("")}</div>
+      <div class="h-label">Step by step</div>
+      <ol class="how-steps">${steps.map(([t, d]) => `<li><b>${t}</b><p>${d}</p></li>`).join("")}</ol>
+      <p class="fine">Runs on Arc's test network with free test dollars. USDC is Arc's own currency, so each action costs about a cent.${p ? " Protection is community protection on test dollars, not a licensed product." : ""}</p>
+      <div class="row" style="margin-top:6px"><button class="btn ghost" data-action="help">Help and contact</button><a class="btn ghost" href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">See the contract on Arc ↗</a><button class="btn primary" data-close>Got it</button></div>
+    `);
+  }
+
+  function openHelp() {
+    const faq = [
+      ["Is this real money, and are these real pieces?", "No. This is a prototype on Arc's test network. The dollars are free test dollars, the listings are demo pieces, and their pictures are our own 3D renders."],
+      ["How do I try it without signing up?", "On the home page, click \"Try the demo\", then Buyer, Seller or Authenticator. You're signed in to a demo account straight away."],
+      ["How do I get test dollars?", "Sign in, click \"Add money\" at the top, then choose Get $1, $5 or $10. It arrives in a few seconds."],
+      ["The page is slow or says it's connecting to Arc.", "The first load reads the contract on Arc and can take about 10 seconds. If nothing shows after 20 seconds, reload the page once."],
+      ["What does \"Bond-backed\" mean?", "The specialist who checked that piece has locked money behind the check. If a second specialist proves the piece fake, that money goes to the buyer."],
+      ["I think a piece I bought is fake. What do I do?", "If you added protection, open Buy, then \"My purchases\", and click \"This is a fake\". You post a 5% deposit, a different specialist inspects it, and if it's fake you get the full price and your deposit back."],
+      ["How do I become a member or an authenticator?", "Membership is by invitation from an existing member. Authenticators are approved by the admin and stake a bond before they can stamp pieces."],
+    ];
+    const c = CONTACT, lines = [];
+    if (c.email) lines.push(`<a class="btn ghost" href="mailto:${esc(c.email)}">Email ${esc(c.email)}</a>`);
+    if (c.linkedin) lines.push(`<a class="btn ghost" href="${esc(c.linkedin)}" target="_blank" rel="noopener">LinkedIn ↗</a>`);
+    openModal("Help", `
+      <div class="faq">${faq.map(([q, a], i) => `<details ${i === 0 ? "open" : ""}><summary>${q}</summary><p>${a}</p></details>`).join("")}</div>
+      <div class="contact-box">
+        <b>Still stuck, or have a question?</b>
+        <p>${c.name ? `Wardrobe Passport was built by ${esc(c.name)} for the UBC 2026 hackathon.` : "Wardrobe Passport is a hackathon prototype."}${lines.length ? " Get in touch:" : ""}</p>
+        ${lines.length ? `<div class="row">${lines.join("")}</div>` : ""}
+      </div>
+      <div class="row" style="margin-top:14px"><button class="btn ghost" data-action="how">How it works</button><button class="btn primary" data-close>Close</button></div>
     `);
   }
 
@@ -2275,6 +2320,7 @@
       case "copy-invite": copy(inviteUrl(el.dataset.code), "Invite link copied."); break;
       case "add-item": openAddItem(); break;
       case "how": openHow(); break;
+      case "help": openHelp(); break;
       case "add-money": openAddMoney(); break;
       case "copy-addr": copy(state.me?.address, "Account number copied."); break;
       case "copy-link": copy(passportUrl(id), "Passport link copied."); break;
