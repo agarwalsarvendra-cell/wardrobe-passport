@@ -1161,3 +1161,14 @@ body:not(.signed-out) .top-link:not(.how) { display: none; }
 .hero-promises li { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: var(--ink); }
 .hero-promises svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--rose, #F0435A); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 [data-protect] .payout { margin: 12px 0; }
+
+/* Stats pass (Nov 18): promises stacked, one quiet stats line, bond figures in How it works */
+.hero-promises { flex-direction: column; gap: 8px; }
+.hero-stats { margin: 16px 0 0; font-size: 14px; color: var(--muted); }
+.hero-stats:empty { display: none; }
+.how-bond-p { margin: 0 0 12px; color: var(--muted); font-size: 14.5px; line-height: 1.5; }
+.how-bond { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
+.how-bond div { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+.how-bond b { display: block; font-size: 20px; font-weight: 800; color: var(--ink); }
+.how-bond small { color: var(--muted); font-size: 13px; }
+@media (max-width: 640px) { .how-bond { grid-template-columns: 1fr 1fr; } }

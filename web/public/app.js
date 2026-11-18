@@ -601,6 +601,7 @@
             <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>Money held until it arrives</li>
             <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>Refunded if it's fake</li>
           </ul>
+          <p id="hero-stats" class="hero-stats"></p>
           <details class="try-as">
             <summary>Try the demo</summary>
             <div class="try-row">
@@ -623,6 +624,12 @@
   /** Picks which listed piece the hero's 3D model shows (a real listing when there is one). The refund split now lives on the listing page and at checkout. */
   let heroPiece = "";
   function renderHeroRefund() {
+    const hs = $("#hero-stats");
+    if (hs) {
+      const s = stats();
+      const t = `${plural(s.members, "member", "members")} · ${plural(s.sales, "sale", "sales")}${prot() ? ` · ${usd(totalBonds() + BigInt(prot().pool.assets))} staked behind the stamps` : ""}`;
+      if (hs.textContent !== t) hs.textContent = t;
+    }
     const st = $(".stage3d"); if (!st) return;
     const ok = (i) => i.status === STATUS.LISTED && prot() && certified(i) && quoteOf(i) && SEED_ART[i.name];
     const pool = (state.items || []).filter(ok);
@@ -633,22 +640,19 @@
   }
 
   function renderLanding() {
-    const s = stats();
     const live = listedNow().filter(matches).reverse();
     const sold = recentlySold().filter(matches).reverse();
     const filtering = state.q.trim() || state.cat !== "all";
     return `
       <div class="intro" id="browse">
         <div><h2>Browse pieces</h2></div>
-        <div class="intro-facts"><span><b>${s.members}</b> members</span><span><b>${s.sales}</b> sales</span><span><b>${s.disputes}</b> ${s.disputes === 1 ? "dispute" : "disputes"} decided</span>${prot() ? `<span><b>${usd(totalBonds() + BigInt(prot().pool.assets))}</b> staked behind stamps and protection</span>` : ""}</div>
       </div>
       ${chipsHtml()}
       ${live.length ? `<div class="lgrid">${live.map((i) => card(i, "")).join("")}</div>`
         : `<div class="empty slim"><p>${filtering ? "Nothing matches. Try another category or search." : "Nothing for sale yet."}</p></div>`}
       ${sold.length ? `<h3 class="grid-h">Recently sold</h3><div class="lgrid">${sold.map((i) => card(i, "")).join("")}</div>` : ""}
       ${buyStepsHtml()}
-      ${communityHtml()}
-      ${protectionPitchHtml()}`;
+      ${communityHtml()}`;
   }
 
   // The people in the community. Each one can be used to try the app (demo sign-in).
@@ -2021,6 +2025,22 @@
   // Shown publicly in Help. Leave a value empty to hide that line.
   const CONTACT = { name: "Sarvendra Agarwal", email: "", linkedin: "" };
 
+  // When an authenticator is wrong, it pays: the live figures, shown in How it works.
+  function howBondHtml() {
+    const p = prot();
+    if (!p) return "";
+    const covers = p.covers.length, paid = p.covers.filter((c) => c.state === "paid").length;
+    return `
+      <div class="h-label">When an authenticator is wrong, it pays</div>
+      <p class="how-bond-p">Each authenticator stakes a bond behind its stamp. If a second specialist finds a protected piece is fake, the bond pays first and a pool funded by members pays the rest.</p>
+      <div class="how-bond">
+        <div><b>${usd(totalBonds())}</b><small>staked by ${plural(Object.keys(p.shops).length, "authenticator", "authenticators")}</small></div>
+        <div><b>${usd(BigInt(p.pool.assets))}</b><small>in the members' pool</small></div>
+        <div><b>${covers}</b><small>${covers === 1 ? "purchase" : "purchases"} protected</small></div>
+        <div><b>${usd(BigInt(p.pool.paid))}</b><small>paid out on ${plural(paid, "fake", "fakes")}</small></div>
+      </div>`;
+  }
+
   function openHow() {
     const p = !!prot();
     const short3 = [
@@ -2041,6 +2061,7 @@
       <div class="how-short">${short3.map(([t, d]) => `<div><b>${t}</b><p>${d}</p></div>`).join("")}</div>
       <div class="h-label">Step by step</div>
       <ol class="how-steps">${steps.map(([t, d]) => `<li><b>${t}</b><p>${d}</p></li>`).join("")}</ol>
+      ${howBondHtml()}
       <p class="fine">Runs on Arc's test network with free test dollars. USDC is Arc's own currency, so each action costs about a cent.${p ? " Protection is community protection on test dollars, not a licensed product." : ""}</p>
       <div class="row" style="margin-top:6px"><button class="btn ghost" data-action="help">Help and contact</button><a class="btn ghost" href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">See the contract on Arc ↗</a><button class="btn primary" data-close>Got it</button></div>
     `);
