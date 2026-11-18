@@ -1178,3 +1178,6 @@ body:not(.signed-out) .top-link:not(.how) { display: none; }
 .backdrop .community-head { margin-top: 0; }
 .backdrop #community-h { display: none; }
 .try-more { display: block; margin-top: 10px; font-size: 14px; font-weight: 700; color: var(--ink); }
+
+/* Fast first paint (Nov 18): small loader under the hero while listings load */
+.loading.slim { padding: 48px 20px; font-size: 15px; }

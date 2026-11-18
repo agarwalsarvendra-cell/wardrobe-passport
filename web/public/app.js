@@ -252,6 +252,7 @@
     state.demo = s.demo || [];
     state.seeded = s.seeded || [];
     if (!state.isAdmin) state.viewAs = null;
+    state.sessionReady = true;
     pickView(true);
   }
 
@@ -591,7 +592,7 @@
   // This block is static, so the live refresh never rebuilds the 3D scene.
   function renderHero() {
     const el = $("#hero");
-    if (!state.loaded || signedIn() || state.inviteCode || state.publicId) { if (el.innerHTML) { el.innerHTML = ""; el.dataset.sig = ""; } return; }
+    if (!state.sessionReady || signedIn() || state.inviteCode || state.publicId) { if (el.innerHTML) { el.innerHTML = ""; el.dataset.sig = ""; } return; }
     if (el.dataset.sig === "why") return;
     el.dataset.sig = "why";
     el.innerHTML = `
@@ -630,7 +631,7 @@
   let heroPiece = "";
   function renderHeroRefund() {
     const hs = $("#hero-stats");
-    if (hs) {
+    if (hs && state.loaded) {
       const s = stats();
       const t = `${plural(s.members, "member", "members")} · ${plural(s.sales, "sale", "sales")}${prot() ? ` · ${usd(totalBonds() + BigInt(prot().pool.assets))} staked behind the stamps` : ""}`;
       if (hs.textContent !== t) hs.textContent = t;
@@ -1502,7 +1503,14 @@
       return;
     }
     if (state.inviteCode) { $("#hero").innerHTML = ""; const h = renderJoin(); if (view.dataset.sig !== h) { view.innerHTML = h; view.dataset.sig = h; } mountJoin(); return; }
-    if (!state.loaded) { view.dataset.sig = ""; view.innerHTML = `<div class="loading"><div class="spinner"></div>Connecting to Arc…</div>`; return; }
+    if (!state.loaded) {
+      const landing = state.sessionReady && !signedIn() && !state.publicId;
+      if (landing) { renderHero(); document.body.classList.add("signed-out"); }
+      const msg = landing ? "Loading pieces…" : "Connecting to Arc…";
+      const h = `<div class="loading${landing ? " slim" : ""}"><div class="spinner"></div>${msg}</div>`;
+      if (view.dataset.sig !== h) { view.innerHTML = h; view.dataset.sig = h; }
+      return;
+    }
     if (state.publicId) { $("#hero").innerHTML = ""; const h = renderPublic(state.publicId); if (view.dataset.sig !== h) { view.innerHTML = h; view.dataset.sig = h; } return; }
     renderHero();
     renderHeroRefund();
@@ -2469,6 +2477,7 @@
     render();
     try {
       await connect();
+      render(); // the hero appears now; listings follow when the chain read finishes
       await route();
       await refresh();
       setInterval(() => { if (!state.busy && !document.hidden && !refreshPending) refresh(); }, CFG.refreshMs);
