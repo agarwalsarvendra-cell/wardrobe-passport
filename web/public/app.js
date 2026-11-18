@@ -596,6 +596,11 @@
           <h2 id="why-h">Pre-owned watches and jewelry you can trust</h2>
           <p>A specialist checks every piece in person and stakes money on that check. Your payment is held until the piece arrives.</p>
           <div class="row why-cta"><a class="btn gold" href="#browse" data-scroll="browse">Browse pieces</a></div>
+          <ul class="hero-promises">
+            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>Checked in person</li>
+            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>Money held until it arrives</li>
+            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>Refunded if it's fake</li>
+          </ul>
           <details class="try-as">
             <summary>Try the demo</summary>
             <div class="try-row">
@@ -610,29 +615,21 @@
             <canvas aria-hidden="true"></canvas>
             <div class="orbit"></div>
           </div>
-          <div id="hero-refund" class="hero-refund"></div>
         </div>
       </section>`;
     window.dispatchEvent(new Event("wp:stage"));
   }
 
-  /** Under the 3D piece: where the money comes from if that piece is proven fake. Real figures for a real listing when there is one. */
+  /** Picks which listed piece the hero's 3D model shows (a real listing when there is one). The refund split now lives on the listing page and at checkout. */
+  let heroPiece = "";
   function renderHeroRefund() {
-    const el = $("#hero-refund"); if (!el) return;
+    const st = $(".stage3d"); if (!st) return;
     const ok = (i) => i.status === STATUS.LISTED && prot() && certified(i) && quoteOf(i) && SEED_ART[i.name];
     const pool = (state.items || []).filter(ok);
     const item = pool.find((i) => SEED_ART[i.name] === "seamaster") || pool.find((i) => /watch/.test(catOf(i) || "")) || pool[0];
-    let html;
-    if (item) {
-      html = `<div class="hero-refund-top"><span><b>${esc(item.name)}</b> · ${usd(item.price)}</span><button class="linkish" data-open="${item.id}">See this piece</button></div>${payoutBar({ amount: item.price, shop: item.authBy }, true)}`;
-      const file = `${SEED_ART[item.name]}.jpg`;
-      if (el.dataset.piece !== file) { el.dataset.piece = file; const st = $(".stage3d"); if (st) st.dataset.piece = file; window.dispatchEvent(new CustomEvent("wp:hero-piece", { detail: file })); }
-    } else {
-      html = `<div class="payout preview"><div class="payout-head">If a piece is proven fake, the buyer gets the full price back</div>
-        <div class="payout-bar" role="img" aria-label="Half from the authenticator's bond, half from the members' pool"><span class="pb-bond" style="width:50%"></span><span class="pb-pool" style="width:50%"></span></div>
-        <div class="payout-legend"><span><i class="pb-bond"></i><b>Half</b> from the authenticator’s bond</span><span><i class="pb-pool"></i><b>Half</b> from the members' pool</span></div></div>`;
-    }
-    if (el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; }
+    if (!item) return;
+    const file = `${SEED_ART[item.name]}.jpg`;
+    if (heroPiece !== file) { heroPiece = file; st.dataset.piece = file; window.dispatchEvent(new CustomEvent("wp:hero-piece", { detail: file })); }
   }
 
   function renderLanding() {
@@ -1780,7 +1777,7 @@
       let ph = "";
       if (q && item.status === STATUS.LISTED) {
         ph = q.available
-          ? `<div class="prot-quote"><span class="shield" aria-hidden="true">🛡</span><span><b>Add 90-day protection: ${usd(q.fee)}</b><small>${pctTxt(q.feeBps)} of the price, offered after you pay. If a second specialist finds it's fake within 90 days of delivery, you get the full price back.</small></span></div>${whyPriceHtml(item, q)}`
+          ? `<div class="prot-quote"><span class="shield" aria-hidden="true">🛡</span><span><b>Add 90-day protection: ${usd(q.fee)}</b><small>${pctTxt(q.feeBps)} of the price, offered after you pay. If a second specialist finds it's fake within 90 days of delivery, you get the full price back.</small></span></div>${payoutBar({ amount: item.price, shop: item.authBy }, true)}${whyPriceHtml(item, q)}`
           : `<p class="hint">${certified(item) ? "Protection isn't available on this piece right now." : "Not certified by a specialist, so it can't be protected."}</p>`;
       } else if (isBuyer || (isOwner && coverFor(item, myAddr()))) {
         ph = coverBlock(item);

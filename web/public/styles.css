@@ -1155,3 +1155,9 @@ body:not(.signed-out) .top-link:not(.how) { display: none; }
   .grid-h { margin-top: 48px; }
   .buy-steps, .community, .pitch { margin-top: 64px; }
 }
+
+/* Hero promises (Nov 18): replace the refund card under the watch */
+.hero-promises { list-style: none; margin: 22px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px 22px; }
+.hero-promises li { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: var(--ink); }
+.hero-promises svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--rose, #F0435A); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+[data-protect] .payout { margin: 12px 0; }
