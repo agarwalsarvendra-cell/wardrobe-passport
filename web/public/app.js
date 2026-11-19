@@ -659,6 +659,7 @@
       ${chipsHtml(true)}
       ${live.length ? `<div class="lgrid">${live.map((i) => card(i, "")).join("")}</div>`
         : `<div class="empty slim"><p>${filtering ? "Nothing matches. Try another category or search." : (showSold ? "Nothing sold yet." : "Nothing for sale yet.")}</p></div>`}
+      ${authenticatorsHtml()}
       ${buyStepsHtml()}
 `;
   }
@@ -704,6 +705,54 @@
           <div><b>${usd(BigInt(p.pool.paid))}</b><small>paid out on ${plural(paid, "fake", "fakes")}</small></div>
         </div>
       </section>`;
+  }
+
+  // Spotlight on the partner authenticators: who they are, what they're qualified in, and the money behind their checks.
+  function shopFacts(p) {
+    const ss = shopStatsOf(p.addr);
+    const specs = specialtiesOf(p.addr);
+    const fakes = ss ? specs.reduce((n, k) => n + (ss.fakesIn?.[k] || 0), 0) : 0;
+    const live = state.items.filter((i) => same(i.authBy, p.addr) && i.status === STATUS.LISTED && !paused(i)).length;
+    return { ss, specs, fakes, live, bond: ss ? BigInt(ss.bond) : 0n };
+  }
+  function authenticatorsHtml() {
+    const shops = activePartners();
+    if (!shops.length) return "";
+    return `
+      <section class="spot" aria-labelledby="spot-h">
+        <div class="spot-head"><h2 id="spot-h">Meet the authenticators</h2><p>Local specialists who check every piece in person and put their own money behind the check.</p></div>
+        <div class="spot-cards">${shops.map((p) => {
+          const f = shopFacts(p);
+          const lead = f.specs[0] ? specIn(p.addr, f.specs[0])?.credential : "";
+          return `<button class="spot-card" data-action="shop" data-addr="${esc(p.addr)}" aria-label="See ${esc(p.name)}'s profile">
+            <span class="spot-top">${avatar(p.name, p.addr, "avatar spot-av")}<span><b>${esc(p.name)}</b><small>${esc(p.city)} · Verified partner</small></span></span>
+            ${lead ? `<span class="spot-cred">“${esc(lead)}”</span>` : ""}
+            ${f.specs.length ? `<span class="spot-tags">${f.specs.map((k) => `<span class="spot-tag">${esc(catName(k))}</span>`).join("")}</span>` : ""}
+            <span class="spot-stats">
+              <span><b>${prot() ? usd(f.bond) : "—"}</b><small>bond staked</small></span>
+              <span><b>${p.authenticated}</b><small>pieces checked</small></span>
+              <span><b>${f.fakes}</b><small>${f.fakes === 1 ? "fake missed" : "fakes missed"}</small></span>
+            </span>
+          </button>`;
+        }).join("")}</div>
+      </section>`;
+  }
+  function openShop(addr) {
+    const p = partnerOf(addr);
+    if (!p) return;
+    const f = shopFacts(p);
+    const pieces = state.items.filter((i) => same(i.authBy, p.addr) && i.status === STATUS.LISTED && !paused(i)).reverse();
+    openModal(p.name, `
+      <div class="shop-profile">
+        <div class="spot-top">${avatar(p.name, p.addr, "avatar spot-av")}<span><b>${esc(p.name)}</b><small>${esc(p.city)} · Verified partner on Arc</small></span></div>
+        <div class="h-label">Qualified in</div>
+        ${f.specs.length ? `<ul class="spec-list">${f.specs.map((k) => `<li><b>${esc(catName(k))}</b><span>${esc(specIn(p.addr, k)?.credential || "")}</span><small>${f.ss?.fakesIn?.[k] || 0} fakes missed</small></li>`).join("")}</ul>` : `<p class="hint">No specialties approved yet.</p>`}
+        <div class="h-label">Their record</div>
+        ${tiles([[prot() ? usd(f.bond) : "—", "bond staked"], [prot() && f.ss ? usd(BigInt(f.ss.free)) : "—", "bond free for new checks"], [p.authenticated, "pieces checked"], [p.membersVerified, "IDs checked"], [f.fakes, "fakes missed"]])}
+        <p class="fine">If a piece they checked is proven fake by a different specialist, their bond pays the buyer first, and the fake is added to this record. Nobody can edit it.</p>
+        <div class="h-label">Pieces they checked, for sale now</div>
+        ${pieces.length ? `<div class="lgrid">${pieces.map((i) => card(i, "")).join("")}</div>` : `<p class="hint">Nothing for sale right now.</p>`}
+      </div>`);
   }
 
   // What happens when you buy, in order. Shown under the listings.
@@ -1698,7 +1747,7 @@
           <p class="pid-line">Passport No. ${pad(item.id)} · <a href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">on Arc ↗</a></p>
           <h4 class="detail-title">${esc(item.name)}</h4>
           <p class="detail-brand">${esc(item.brand || "No brand")}${item.details ? `, ${esc(item.details)}` : ""}</p>
-          ${verified(item) ? `<div class="trust"><span class="ti">✓</span><span><b>Checked in person${catOf(item) && specIn(item.authBy, catOf(item)) ? ` by a ${esc(catName(catOf(item)).toLowerCase())} specialist` : ""}</b><small>${esc(shop ? `${shop.name}, ${shop.city}` : nameOf(item.authBy))} · ${fmtDate(item.authAt)}${catOf(item) && specIn(item.authBy, catOf(item)) ? ` · ${esc(specIn(item.authBy, catOf(item)).credential)}` : ""}</small></span></div>` : authLine(item)}
+          ${verified(item) ? `<div class="trust"><span class="ti">✓</span><span><b>Checked in person${catOf(item) && specIn(item.authBy, catOf(item)) ? ` by a ${esc(catName(catOf(item)).toLowerCase())} specialist` : ""}</b><small>${shop ? `<button class="linkish" data-action="shop" data-addr="${esc(shop.addr)}">${esc(`${shop.name}, ${shop.city}`)}</button>` : esc(nameOf(item.authBy))} · ${fmtDate(item.authAt)}${catOf(item) && specIn(item.authBy, catOf(item)) ? ` · ${esc(specIn(item.authBy, catOf(item)).credential)}` : ""}</small></span></div>` : authLine(item)}
           ${bondBacked(item) ? `<div class="trust"><span class="ti bond-ti">$</span><span><b>${esc(nameOf(item.authBy))} has ${usd(bondLockFor(item))} of their bond behind this piece</b><small>If a second specialist proves it fake, that bond pays you first. ${usd(BigInt(shopStatsOf(item.authBy).free))} of their bond is free right now.</small></span></div>` : item.status === STATUS.LISTED && verified(item) && prot() ? `<div class="trust muted-trust"><span class="ti">$</span><span><small>Bond not available for this piece right now.</small></span></div>` : ""}
           <div class="trust"><span class="ti">${esc((nameOf(item.owner) || "?")[0])}</span><span><b>${esc(nameOf(item.owner))}</b><small>${esc(levelOf(item.owner).label)} · ${esc(recText(item.owner))}</small></span></div>
           <div class="pricebox">
@@ -2371,6 +2420,7 @@
       case "add-item": openAddItem(); break;
       case "how": openHow(); break;
       case "help": openHelp(); break;
+      case "shop": openShop(el.dataset.addr); break;
       case "community": { const c = communityHtml(); openModal("Meet the community", c || `<p class="hint">No members to show yet.</p>`); break; }
       case "add-money": openAddMoney(); break;
       case "copy-addr": copy(state.me?.address, "Account number copied."); break;

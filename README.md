@@ -115,4 +115,4 @@ One membership, with separate views:
 
 ## Photo credits
 
-Demo listing photos in `web/public/seed/` are free photos from [Pexels](https://www.pexels.com/license/) (Pexels IDs: 29298231, 10414975, 8839604, 1432234, 16739805, 33524465, 28977357, 33423909, 10591429, 11365012, 34399115, 2849742, 32988751), cropped to squares. They illustrate the category only; brands shown in a photo are not the listed piece. Pieces without a photo use our own 3D renders.
+Demo listing photos in `web/public/seed/` are free photos from [Pexels](https://www.pexels.com/license/) (Pexels IDs: 29298231, 10414975, 8839604, 1432234, 16739805, 33524465, 28977357, 33423909, 10591429, 11365012, 34399115, 2849742, 32988751, 27174573, 4830924, 9267583, 8801036, 12155925, 26592836, 13595531, 12427695, 35961143), cropped to squares. They illustrate the category only; brands shown in a photo are not the listed piece. Pieces without a photo use our own 3D renders.

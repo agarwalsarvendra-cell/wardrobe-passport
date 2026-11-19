@@ -1193,3 +1193,27 @@ body:not(.signed-out) .top-link:not(.how) { display: none; }
 .sg-who small { color: var(--rose-2, #D70466); font-size: 13px; font-weight: 600; }
 .sg-row p { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--muted); }
 @media (max-width: 640px) { .sg-row { grid-template-columns: 1fr; gap: 4px; } }
+
+/* Authenticator spotlight (Nov 19): "Meet the authenticators" on the homepage and a profile window */
+.spot { margin-top: 96px; }
+.spot-head h2 { margin: 0 0 6px; }
+.spot-head p { margin: 0 0 20px; color: var(--muted); font-size: 16px; }
+.spot-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+.spot-card { text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 20px; display: flex; flex-direction: column; gap: 12px; cursor: pointer; font: inherit; color: var(--ink); transition: box-shadow .2s ease, transform .2s ease; }
+.spot-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,.10); transform: translateY(-2px); }
+.spot-top { display: flex; align-items: center; gap: 12px; }
+.spot-top b { display: block; font-size: 17px; }
+.spot-top small { color: var(--muted); font-size: 13.5px; }
+.avatar.spot-av { width: 48px; height: 48px; font-size: 20px; flex: none; }
+.spot-cred { font-size: 14.5px; color: var(--ink); font-style: italic; }
+.spot-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.spot-tag { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; font-weight: 600; color: var(--rose-2, #D70466); }
+.spot-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.spot-stats b { display: block; font-size: 18px; font-weight: 800; }
+.spot-stats small { color: var(--muted); font-size: 12.5px; }
+.shop-profile .spec-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 8px; }
+.shop-profile .spec-list li { display: grid; grid-template-columns: 150px 1fr auto; gap: 10px; align-items: baseline; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.shop-profile .spec-list span { color: var(--muted); font-size: 14px; }
+.shop-profile .spec-list small { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.shop-profile .lgrid { margin-top: 6px; }
+@media (max-width: 640px) { .spot { margin-top: 64px; } .shop-profile .spec-list li { grid-template-columns: 1fr; gap: 2px; } }
