@@ -218,7 +218,7 @@
     "Solitaire ring": "solitaire", "Tabby shoulder bag": "tabby", "Leather crossbody": "crossbody", "Quilted flap bag": "quilted", "Leather tote": "tote",
   };
   function art(item, cls = "") {
-    const src = photoSrc(item.imageUrl) || (SEED_ART[item.name] ? `seed/${SEED_ART[item.name]}.jpg?v=3` : null);
+    const src = photoSrc(item.imageUrl) || (SEED_ART[item.name] ? `seed/${SEED_ART[item.name]}.jpg?v=4` : null);
     if (src) return `<div class="art photo ${cls}"><img src="${esc(src)}" alt="${esc(item.name)}" loading="lazy"></div>`;
     const k = iconKey(item.imageUrl);
     const ic = ICONS[k];
@@ -2101,7 +2101,7 @@
 
   function openHelp() {
     const faq = [
-      ["Is this real money, and are these real pieces?", "No. This is a prototype on Arc's test network. The dollars are free test dollars, the listings are demo pieces, and their pictures are our own 3D renders."],
+      ["Is this real money, and are these real pieces?", "No. This is a prototype on Arc's test network. The dollars are free test dollars, the listings are demo pieces, and their pictures are free stock photos from Pexels (or our own 3D renders), used only for illustration."],
       ["How do I try it without signing up?", "On the home page, click \"Try the demo\", then Buyer, Seller or Authenticator. You're signed in to a demo account straight away."],
       ["How do I get test dollars?", "Sign in, click \"Add money\" at the top, then choose Get $1, $5 or $10. It arrives in a few seconds."],
       ["The page is slow or says it's connecting to Arc.", "The first load reads the contract on Arc and can take about 10 seconds. If nothing shows after 20 seconds, reload the page once."],
