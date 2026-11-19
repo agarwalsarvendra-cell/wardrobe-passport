@@ -47,6 +47,16 @@ const dollars = (v: unknown, what: string): bigint => {
 };
 const sameAddr = (a: string, b: string) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
+const CONFLICT_MSG = "A jeweler can't check a piece from someone linked to them. Choose another specialist.";
+/** Conflict-of-interest check (app level): the partner is the owner, or the partner invited the owner. On-chain enforcement is the next contract version. */
+async function linkedTo(owner: string, partner: string): Promise<boolean> {
+  if (sameAddr(owner, partner)) return true;
+  try {
+    const m = await contract().members(owner);
+    return !!m.invitedBy && sameAddr(m.invitedBy, partner);
+  } catch { return false; }
+}
+
 /** A piece counts as verified when a partner authenticated it after it last changed hands. */
 async function verifiedBy(id: number): Promise<{ item: any; fresh: boolean }> {
   const c = contract();
@@ -87,6 +97,7 @@ async function offChain(user: User, action: string, body: any) {
     const p = await contract().partners(body.partner);
     if (!p.active) throw new UserError("That authenticator isn't approved.");
     if (sameAddr(body.partner, user.address)) throw new UserError("You can't authenticate your own piece.");
+    if (await linkedTo(item.owner, body.partner)) throw new UserError(CONFLICT_MSG);
     const cat = await pieceCategory(id);
     if (protectionOn() && cat && !(await protection().specialistIn(body.partner, catKey(cat)))) {
       throw new UserError("That authenticator isn't approved for this category. Choose a specialist.");
@@ -295,6 +306,8 @@ export async function perform(user: User, action: string, body: any) {
       id = posInt(body.id);
       const rows = await q("select partner_address from auth_requests where item_id = $1 and status = 'pending'", [id]);
       if (!rows[0] || !sameAddr(rows[0].partner_address, user.address)) throw new UserError("The owner hasn't asked you to authenticate this piece.");
+      const owner = (await c.getItem(id)).owner;
+      if (await linkedTo(owner, user.address)) throw new UserError(CONFLICT_MSG);
       const cat = await pieceCategory(id);
       if (protectionOn() && cat && !(await protection().specialistIn(user.address, catKey(cat)))) {
         throw new UserError("You're not approved as a specialist for this category, so you can't stamp it.");

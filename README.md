@@ -35,6 +35,17 @@ _Community protection on test dollars, not a licensed insurance product._
 3. **A price for trust.** The fee is calculated on-chain from three records, and members fund the pool that pays claims and earn the fees.
 4. **Specialists by category.** Only a specialist can certify a piece, only a second specialist in the same category can rule on a claim, each category has its own base rate, and an authenticator's fakes are counted per category.
 
+### Nobody can cheat for free
+
+| Who | If they try to | What happens |
+|---|---|---|
+| Seller | List a fake | Loses the listing deposit if a dispute goes against them; every proven fake adds +5% to their protection price |
+| Jeweler (authenticator) | Stamp a fake | Their bond pays the buyer first, and the fake is counted against them in that category |
+| Buyer | Claim a genuine piece is fake | Posts a 5% deposit and loses it if a rival specialist rules the piece genuine; must still own the piece |
+| Panel member | Vote against the evidence | Only members who vote with the outcome share the 2% panel reward |
+
+**Conflict of interest:** a jeweler can't check a piece from its own wallet or from a member it invited. This is an app-level check today; on-chain enforcement is the next contract version.
+
 ### Rating table (share of the price)
 
 `fee = category base + seller + inviter + authenticator`, kept between 1% and 20%.
@@ -98,5 +109,6 @@ One membership, with separate views:
 
 - The dispute panel is drawn from a hash of the dispute's own data. This keeps gas estimates exact but makes the panel predictable; the fix is a VRF or commit-reveal.
 - ID checks are done by the authenticator; the next step is an ID-verification provider.
+- The conflict-of-interest check runs in the app, not the contract; the next contract version enforces it on-chain.
 - A proven fake stays with the buyer after the refund; a real launch would route it back to the authenticator.
 - Test dollars only. A real launch needs money-transmission, marketplace, second-hand dealer and insurance-regulation review.

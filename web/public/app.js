@@ -132,6 +132,8 @@
   const coversOf = (item) => (prot()?.covers || []).filter((c) => c.itemId === item.id);
   /** The cover on the current (or last) sale of a piece to this buyer. */
   const coverFor = (item, buyer) => coversOf(item).filter((c) => same(c.buyer, buyer)).sort((a, b) => b.id - a.id)[0] || null;
+  // What buyCover locks from the authenticator's bond: half the price plus the 2% re-inspection cost.
+  const bondLockFor = (item) => BigInt(item.price) / 2n + (BigInt(item.price) * 200n) / 10000n;
   const bondBacked = (item) => item.status === STATUS.LISTED && !!quoteOf(item)?.available;
   const COVER_DAYS = 90;
   const CLAIM_DEPOSIT_BPS = 500n;
@@ -476,6 +478,7 @@
     if (browse) return `
       <button class="lcard" data-open="${item.id}" aria-label="Open ${esc(item.name)}">
         <div class="lcard-img">${art(item)}
+          ${bondBacked(item) ? `<span class="lbadge bond" title="${esc(nameOf(item.authBy))} has money staked behind this check">Bond-backed</span>` : ""}
           ${item.status === STATUS.DISPUTED ? `<span class="lbadge warn">In dispute</span>` : sold ? `<span class="lbadge muted">Sold</span>` : ""}
         </div>
         <div class="lcard-row"><b>${esc(item.name)}</b>${price ? `<span>${price}</span>` : ""}</div>
@@ -598,13 +601,13 @@
     el.innerHTML = `
       <section class="why" aria-labelledby="why-h">
         <div class="why-copy">
-          <h2 id="why-h">Pre-owned watches and jewelry you can trust</h2>
-          <p>A specialist checks every piece in person and stakes money on that check. Your payment is held until the piece arrives.</p>
+          <h2 id="why-h">If it's fake, the jeweler pays.</h2>
+          <p>Pre-owned watches and jewelry, checked by a local specialist who locks their own money behind every check. Proven fake? You're repaid automatically.</p>
           <div class="row why-cta"><a class="btn gold" href="#browse" data-scroll="browse">Browse pieces</a></div>
           <ul class="hero-promises">
             <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>Checked in person</li>
             <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>Money held until it arrives</li>
-            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>Refunded if it's fake</li>
+            <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>A bond behind every check</li>
           </ul>
           <p id="hero-stats" class="hero-stats"></p>
           <details class="try-as">
@@ -1696,7 +1699,7 @@
           <h4 class="detail-title">${esc(item.name)}</h4>
           <p class="detail-brand">${esc(item.brand || "No brand")}${item.details ? `, ${esc(item.details)}` : ""}</p>
           ${verified(item) ? `<div class="trust"><span class="ti">✓</span><span><b>Checked in person${catOf(item) && specIn(item.authBy, catOf(item)) ? ` by a ${esc(catName(catOf(item)).toLowerCase())} specialist` : ""}</b><small>${esc(shop ? `${shop.name}, ${shop.city}` : nameOf(item.authBy))} · ${fmtDate(item.authAt)}${catOf(item) && specIn(item.authBy, catOf(item)) ? ` · ${esc(specIn(item.authBy, catOf(item)).credential)}` : ""}</small></span></div>` : authLine(item)}
-          ${bondBacked(item) ? `<div class="trust"><span class="ti bond-ti">$</span><span><b>Bond-backed</b><small>${esc(nameOf(item.authBy))} has ${usd(BigInt(shopStatsOf(item.authBy).free))} staked and free to stand behind its stamps. If this piece turns out fake, the bond pays first.</small></span></div>` : ""}
+          ${bondBacked(item) ? `<div class="trust"><span class="ti bond-ti">$</span><span><b>${esc(nameOf(item.authBy))} has ${usd(bondLockFor(item))} of their bond behind this piece</b><small>If a second specialist proves it fake, that bond pays you first. ${usd(BigInt(shopStatsOf(item.authBy).free))} of their bond is free right now.</small></span></div>` : item.status === STATUS.LISTED && verified(item) && prot() ? `<div class="trust muted-trust"><span class="ti">$</span><span><small>Bond not available for this piece right now.</small></span></div>` : ""}
           <div class="trust"><span class="ti">${esc((nameOf(item.owner) || "?")[0])}</span><span><b>${esc(nameOf(item.owner))}</b><small>${esc(levelOf(item.owner).label)} · ${esc(recText(item.owner))}</small></span></div>
           <div class="pricebox">
             <div class="pb-top"><span class="pb-price">${item.status === STATUS.LISTED ? usd(item.price) : f.lastSale ? usd(f.lastSale.price) : "Not for sale"}</span><small data-status></small></div>
@@ -1715,7 +1718,9 @@
 
   /** Authenticators to ask: with protection on, only specialists in the piece's category, with their credential and record there. */
   function partnerSelect(id, cat) {
-    let list = activePartners().filter((p) => !same(p.addr, myAddr()));
+    // A jeweler can't check a piece from someone linked to them: their own wallet, or a member they invited.
+    const myInviter = memberOf(myAddr())?.invitedBy;
+    let list = activePartners().filter((p) => !same(p.addr, myAddr()) && !(myInviter && same(p.addr, myInviter)));
     if (prot() && cat) list = list.filter((p) => specIn(p.addr, cat));
     if (!list.length) return "";
     const label = (p) => {
@@ -2054,6 +2059,19 @@
       </div>`;
   }
 
+  // Nobody can cheat for free: one row per party, only mechanisms the contracts enforce.
+  function safeguardsHtml() {
+    const rows = [
+      ["Seller", "lists a fake", "Loses their listing deposit if a dispute goes against them, and every fake raises the price of protection on their future sales."],
+      ["Jeweler", "stamps a fake", "Their bond pays the buyer first, and the fake is recorded against them in that category for everyone to see."],
+      ["Buyer", "claims a genuine piece is fake", "Posts a 5% deposit to file and loses it if a rival specialist rules the piece genuine. They must still own the piece."],
+      ["Panel member", "votes against the evidence", "Only members who vote with the outcome share the 2% panel reward."],
+    ];
+    return `
+      <div class="h-label">Nobody can cheat for free</div>
+      <div class="safeguards">${rows.map(([who, tries, stop]) => `<div class="sg-row"><div class="sg-who"><b>${who}</b><small>If they ${tries}</small></div><p>${stop}</p></div>`).join("")}</div>`;
+  }
+
   function openHow() {
     const p = !!prot();
     const short3 = [
@@ -2075,6 +2093,7 @@
       <div class="h-label">Step by step</div>
       <ol class="how-steps">${steps.map(([t, d]) => `<li><b>${t}</b><p>${d}</p></li>`).join("")}</ol>
       ${howBondHtml()}
+      ${safeguardsHtml()}
       <p class="fine">Runs on Arc's test network with free test dollars. USDC is Arc's own currency, so each action costs about a cent.${p ? " Protection is community protection on test dollars, not a licensed product." : ""}</p>
       <div class="row" style="margin-top:6px"><button class="btn ghost" data-action="help">Help and contact</button><a class="btn ghost" href="${explorerAddr(CFG.contractAddress)}" target="_blank" rel="noopener">See the contract on Arc ↗</a><button class="btn primary" data-close>Got it</button></div>
     `);
